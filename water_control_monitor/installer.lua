@@ -1,7 +1,5 @@
 -- installer.lua  (OpenComputers) —— 监控端 (monitor 分支) 安装器
--- 用系统 wget 下载，最稳
 
--- 注意：installer.lua 自身不在下载清单内（它是引导脚本，单独运行，不自我下载）。
 local component  = require("component")
 local filesystem = require("filesystem")
 local shell      = require("shell")
@@ -91,15 +89,12 @@ local function main()
     if #fail > 0 then
         print("以下文件失败:")
         for _, m in ipairs(fail) do print("  - " .. m) end
-        error("安装未完全成功。若提示 404/文件为空，请去 GitHub 确认这些文件已 push 到【monitor 分支】的 water_control_monitor/ 目录（不是 master/water_control）。")
+        error("安装未完全成功。请检查网络环境")
     end
 
     print()
-    print("启动: " .. APP_DIR .. "/monitor.lua")
+    print("请按照wiki中的步骤执行程序")
 end
 
 local ok, err = xpcall(main, debug.traceback)   -- 不要 pcall 吞错
 if not ok then print("\n[安装出错]\n" .. tostring(err)) end
-
-
-
