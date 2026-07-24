@@ -75,8 +75,7 @@ local function main()
     end
 
     print()
-    print("启动:  water_control/start   或   lua " .. APP_DIR .. "/main.lua")
-    print("自启:  把  loadfile(\"" .. APP_DIR .. "/main.lua\")()  写入 /autorun.lua")
+    print("启动:lua " .. APP_DIR .. "/main.lua")
 end
 
 local ok, err = xpcall(main, debug.traceback)   -- 不要 pcall 吞错
