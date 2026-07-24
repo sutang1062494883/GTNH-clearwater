@@ -1,8 +1,6 @@
 -- ui_config.lua
 -- UI 配置、颜色、布局与运行时状态
-
 local component = require("component")
-
 local UI = {
     COLORS = {
         BG = 0x0d1117,
@@ -27,8 +25,7 @@ local UI = {
         ALERT_WARN_TEXT = 0xfbbf24,
         ALERT_CRITICAL_TEXT = 0xf87171
     },
-    W = 0,
-    H = 0,
+    W = 0, H = 0,
     areas = {},
     buttons = {},
     levelRows = {},
@@ -41,6 +38,10 @@ local UI = {
     chartMode = "overview",
     currentDetailLevel = nil,
     detailSwitchTime = 0,
+    -- 新增并行面板状态
+    parallelMode = "overview",
+    parallelDetailLevel = nil,
+    parallelDetailSwitchTime = 0,
     historyData = {},
     SAMPLE_INTERVAL = 120,
     MAX_HISTORY_POINTS = 30,
@@ -56,22 +57,18 @@ local UI = {
         viewLevel = 1,
         tabButtons = {}
     },
-    -- 只读模式（接收端=true）
     readonly = false,
-    -- 运行时查询缓存（解耦 machine/fluid 组件，双端绘制统一读取）
     _runtime = {
-        enabled = false,        -- 控制端=false；镜像端 applySnapshot 后置 true
+        enabled = false,
         plantRunning = nil,
         scanResult = nil,
         fluidCache = nil
     },
     _lastSyncTime = 0,
     syncStatus = "未连接",
-    -- 脏区域重绘调度
     render = {
         fingerprints = {},
         forceAll = true
     }
 }
-
 return UI
