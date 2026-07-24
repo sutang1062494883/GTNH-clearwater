@@ -1,27 +1,21 @@
 -- machine.lua
 -- 机器扫描、功率计算、等级参数计算
+
 local component = require("component")
 local cfgModule = require("config")
 local CONFIG = cfgModule.CONFIG
 local CONST = cfgModule.CONST
 local utils = require("utils")
+
 local machine = {}
+
 local machines = {}
 for level = 0, 8 do machines[level] = { proxies = {} } end
+
 local MACHINE_SCAN_RESULT = { total = 0, host = 0, units = {} }
 
 function machine.getMachines() return machines end
 function machine.getScanResult() return MACHINE_SCAN_RESULT end
-
--- 刷新已启用的等级列表
-function machine.refreshCachedLevels()
-    CONFIG.CACHED_LEVELS = {}
-    for level = 1, 8 do
-        if CONFIG.CACHED_CONFIG[level] and CONFIG.CACHED_CONFIG[level].enabled then
-            table.insert(CONFIG.CACHED_LEVELS, level)
-        end
-    end
-end
 
 function machine.scanAndCalculateTotalPower()
     local totalPower = 0
@@ -82,6 +76,37 @@ function machine.initializeMachinesAndPower()
     local hasValidEnergy, totalPower = machine.scanAndCalculateTotalPower()
     return hasValidEnergy, string.format("[扫描] 发现净水机器 %d 台，总可用功率 %s EU/t",
         MACHINE_SCAN_RESULT.total, utils.formatNumber(totalPower))
+end
+
+function machine.loadCacheConfigFromRequesters()
+    local cacheSlots = {}
+    for address, _ in component.list("level_maintainer") do
+        local proxy = component.proxy(address)
+        if not proxy then goto continue end
+        for slot = 1, 5 do
+            local success, slotData = pcall(proxy.getSlot, slot)
+            if success and slotData and slotData.isEnable and slotData.isFluid then
+                local fluidName = slotData.fluid and slotData.fluid.name or slotData.name
+                local cleanName = fluidName:lower():match(":(.+)$") or fluidName:lower()
+                local level = tonumber(string.match(cleanName, "grade(%d+)%s*[_-]?%s*purifiedwater"))
+                if level and level >= 1 and level <= 8 then
+                    cacheSlots[level] = { buffer = slotData.quantity or 0, fluidId = fluidName }
+                end
+            end
+        end
+        ::continue::
+    end
+    CONFIG.CACHED_LEVELS = {}
+    for level = 1, 8 do
+        local slotInfo = cacheSlots[level]
+        if slotInfo then
+            CONFIG.CACHED_CONFIG[level] = { threshold = slotInfo.buffer, enabled = true, fluidId = slotInfo.fluidId }
+            table.insert(CONFIG.CACHED_LEVELS, level)
+        else
+            CONFIG.CACHED_CONFIG[level] = { threshold = 0, enabled = false, fluidId = CONST.FLUID_NAMES[level] }
+        end
+    end
+    return true
 end
 
 function machine.calculateAndSaveLevelParams()

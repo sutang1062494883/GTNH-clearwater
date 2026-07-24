@@ -1,19 +1,12 @@
 -- config.lua
 -- 全局配置与常量定义
+
 local sides = require("sides")
+
 local CONFIG = {
     POWER_SWITCH_PORT = sides.west,
     TOTAL_POWER = 0,
-    CACHED_CONFIG = {
-        [1] = { threshold = 0, enabled = false, fluidId = "grade1purifiedwater" },
-        [2] = { threshold = 0, enabled = false, fluidId = "grade2purifiedwater" },
-        [3] = { threshold = 0, enabled = false, fluidId = "grade3purifiedwater" },
-        [4] = { threshold = 0, enabled = false, fluidId = "grade4purifiedwater" },
-        [5] = { threshold = 0, enabled = false, fluidId = "grade5purifiedwater" },
-        [6] = { threshold = 0, enabled = false, fluidId = "grade6purifiedwater" },
-        [7] = { threshold = 0, enabled = false, fluidId = "grade7purifiedwater" },
-        [8] = { threshold = 0, enabled = false, fluidId = "grade8purifiedwater" },
-    },
+    CACHED_CONFIG = {},
     CACHED_LEVELS = {},
     LAST_PLANT_STATUS = nil,
     SYSTEM_EMERGENCY_STOPPED = false,
@@ -52,11 +45,12 @@ local CONFIG = {
     },
     -- 流体缓存配置
     FLUID_CACHE = {
-        TTL = 15.0,
+        TTL = 15.0,            -- 缓存有效期：必须 > QUERY_INTERVAL，留余量防闪
         PREFETCH = true,
-        QUERY_INTERVAL = 10.0
+        QUERY_INTERVAL = 10.0   -- 【新增】真正去查流体组件的间隔（秒）
     },
 }
+
 local CONST = {
     MAX_STOCK_MULTIPLIER = 5,
     MAX_SINGLE_PARALLEL = 2147484,
@@ -96,4 +90,5 @@ local CONST = {
         MAX_DAY_POINTS = 28
     }
 }
+
 return { CONFIG = CONFIG, CONST = CONST }

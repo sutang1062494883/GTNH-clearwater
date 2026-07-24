@@ -1,6 +1,8 @@
 -- ui_config.lua
 -- UI 配置、颜色、布局与运行时状态
+
 local component = require("component")
+
 local UI = {
     COLORS = {
         BG = 0x0d1117,
@@ -54,16 +56,11 @@ local UI = {
         viewLevel = 1,
         tabButtons = {}
     },
-    -- 阈值配置输入面板状态
-    configPanel = {
-        selectedLevel = 1,
-        inputBuffer = "",
-        focus = "level"
-    },
     -- 只读模式（接收端=true）
     readonly = false,
+    -- 运行时查询缓存（解耦 machine/fluid 组件，双端绘制统一读取）
     _runtime = {
-        enabled = false,
+        enabled = false,        -- 控制端=false；镜像端 applySnapshot 后置 true
         plantRunning = nil,
         scanResult = nil,
         fluidCache = nil
@@ -76,4 +73,5 @@ local UI = {
         forceAll = true
     }
 }
+
 return UI

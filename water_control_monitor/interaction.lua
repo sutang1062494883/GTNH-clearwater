@@ -1,23 +1,21 @@
 -- interaction.lua
--- 点击事件与键盘输入处理：按钮、标签切换、等级行点击、阈值配置
+-- 点击事件处理：按钮、标签切换、等级行点击
 local computer = require("computer")
 local cfgModule = require("config")
 local CONFIG = cfgModule.CONFIG
-local CONST = cfgModule.CONST
-
+-- 软依赖：监控端无业务模块时自动降级，不影响UI交互
 local ok_machine, machine = pcall(require, "machine")
 if not ok_machine then machine = nil end
 local ok_scheduler, scheduler = pcall(require, "scheduler")
 if not ok_scheduler then scheduler = nil end
 local ok_report, report = pcall(require, "report")
 if not ok_report then report = nil end
-
 local UI = require("ui_config")
 local ui_draw = require("ui_draw")
-local utils = require("utils")
 local interaction = {}
 
 function interaction.handleClick(x, y, redrawAll)
+    -- 全局标签切换
     if UI.tabButtons then
         for id, btn in pairs(UI.tabButtons) do
             if x >= btn.x and x < btn.x + btn.w and y >= btn.y and y < btn.y + btn.h then
@@ -29,7 +27,7 @@ function interaction.handleClick(x, y, redrawAll)
             end
         end
     end
-
+    -- 报表页交互
     if UI.currentTab == "report" then
         for name, btn in pairs(UI.reportPanel.tabButtons) do
             if x >= btn.x and x < btn.x + btn.w and y >= btn.y and y < btn.y + btn.h then
@@ -49,7 +47,7 @@ function interaction.handleClick(x, y, redrawAll)
         end
         return
     end
-
+    -- 总览页控制按钮（只读模式下不响应）
     if not UI.readonly then
         for name, btn in pairs(UI.buttons) do
             if x >= btn.x and x < btn.x + btn.w and y >= btn.y and y < btn.y + btn.h then
@@ -65,7 +63,7 @@ function interaction.handleClick(x, y, redrawAll)
             end
         end
     end
-
+    -- 等级行点击查看详情
     for level, row in pairs(UI.levelRows) do
         if x >= row.x and x < row.x + row.w and y >= row.y and y < row.y + row.h then
             ui_draw.printLevelDetailToLog(level)
@@ -76,7 +74,7 @@ function interaction.handleClick(x, y, redrawAll)
             return
         end
     end
-
+    -- 图表区点击返回总览
     local chartArea = UI.areas.chart
     if chartArea and x >= chartArea.x and x < chartArea.x + chartArea.w
         and y >= chartArea.y and y < chartArea.y + chartArea.h then
@@ -87,81 +85,6 @@ function interaction.handleClick(x, y, redrawAll)
             return
         end
     end
-end
-
--- 键盘输入处理（完全安全版：杜绝 number 索引崩溃）
-function interaction.handleKey(charCode, keyCode, redrawAll)
-    if UI.readonly then return end
-    local panel = UI.configPanel
-    
-    -- Tab 切换焦点（扫描码 15）
-    if keyCode == 15 then
-        panel.focus = panel.focus == "level" and "value" or "level"
-        redrawAll()
-        return
-    end
-    
-    -- 回车确认（扫描码 28）
-    if keyCode == 28 then
-        interaction._applyConfigChange()
-        redrawAll()
-        return
-    end
-    
-    -- 退格删除（扫描码 14）
-    if keyCode == 14 then
-        if panel.focus == "value" and #panel.inputBuffer > 0 then
-            panel.inputBuffer = string.sub(panel.inputBuffer, 1, -2)
-        end
-        redrawAll()
-        return
-    end
-    
-    -- 数字输入：严格校验类型 + 转字符串
-    if type(charCode) == "number" and charCode > 0 then
-        local charStr = string.char(charCode)
-        if charStr >= "0" and charStr <= "9" then
-            if panel.focus == "level" then
-                local num = tonumber(charStr)
-                if num >= 1 and num <= 8 then
-                    panel.selectedLevel = num
-                    panel.inputBuffer = ""
-                    redrawAll()
-                end
-            elseif panel.focus == "value" then
-                if #panel.inputBuffer < 10 then
-                    panel.inputBuffer = panel.inputBuffer .. charStr
-                    redrawAll()
-                end
-            end
-        end
-    end
-end
-
--- 应用阈值配置修改并持久化
-function interaction._applyConfigChange()
-    if not machine then return end
-    local panel = UI.configPanel
-    local level = panel.selectedLevel
-    local value = tonumber(panel.inputBuffer)
-    if not value or value < 0 then
-        ui_draw.appendLog("[配置] 输入无效，请输入非负数字")
-        return
-    end
-    
-    CONFIG.CACHED_CONFIG[level].threshold = value
-    CONFIG.CACHED_CONFIG[level].enabled = true
-    
-    machine.refreshCachedLevels()
-    machine.calculateAndSaveLevelParams()
-    machine.updateMinimumStocks()
-    
-    -- 立即持久化保存
-    local persistence = require("persistence")
-    pcall(persistence.save)
-    
-    panel.inputBuffer = ""
-    ui_draw.appendLog(string.format("[配置] T%d级阈值已更新为 %s L，已自动保存", level, utils.formatNumber(value)))
 end
 
 function interaction._handleStart()
@@ -183,6 +106,7 @@ function interaction._handleRefresh()
     ui_draw.appendLog("[系统] 执行全量刷新扫描")
     pcall(function()
         machine.initializeMachinesAndPower()
+        machine.loadCacheConfigFromRequesters()
         machine.calculateAndSaveLevelParams()
         machine.updateMinimumStocks()
         report.sampleFluidHistory(true)

@@ -1,5 +1,6 @@
 -- ui_draw.lua
 -- UI 基础绘制 + 统一解耦读取 + 脏区域重绘调度器
+-- 注意：ui_chart 用懒加载（getChart）规避循环依赖
 local unicode = require("unicode")
 local computer = require("computer")
 local cfgModule = require("config")
@@ -7,7 +8,7 @@ local CONFIG = cfgModule.CONFIG
 local CONST = cfgModule.CONST
 local utils = require("utils")
 local UI = require("ui_config")
-
+-- 软依赖：镜像端可能缺失，控制端均存在
 local ok_machine, machine = pcall(require, "machine")
 if not ok_machine then machine = nil end
 local ok_scheduler, scheduler = pcall(require, "scheduler")
@@ -16,31 +17,30 @@ local ok_alert, alert = pcall(require, "alert")
 if not ok_alert then alert = nil end
 local ok_fluid, fluid = pcall(require, "fluid")
 if not ok_fluid then fluid = nil end
-
+-- 懒加载 ui_chart，规避 ui_draw<->ui_chart 循环依赖
 local _ui_chart = nil
 local function getChart()
     if not _ui_chart then _ui_chart = require("ui_chart") end
     return _ui_chart
 end
 local ui_draw = {}
-
 -- ==================== 统一解耦读取入口 ====================
 local function normClean(name)
     local raw = name
     if not raw:find(":") then raw = "gregtech:" .. raw end
     return raw:lower():match(":(.+)$") or raw:lower()
 end
-
 function ui_draw.getFluidAmount(fluidName)
+    -- 仅镜像端（enabled=true）才读注入缓存
     if UI._runtime and UI._runtime.enabled and UI._runtime.fluidCache then
         local clean = normClean(fluidName)
         local v = UI._runtime.fluidCache[clean]
         if v ~= nil then return v end
     end
+    -- 控制端 / 镜像端缓存未命中：走 fluid 组件缓存模块
     if fluid then return fluid.getAmount(fluidName) end
     return 0
 end
-
 function ui_draw.getPlantRunning()
     if UI._runtime and UI._runtime.enabled and UI._runtime.plantRunning ~= nil then
         return UI._runtime.plantRunning
@@ -48,7 +48,6 @@ function ui_draw.getPlantRunning()
     if machine then return machine.isWaterPlantRunning() end
     return false
 end
-
 function ui_draw.getScanResult()
     if UI._runtime and UI._runtime.enabled and UI._runtime.scanResult then
         return UI._runtime.scanResult
@@ -56,12 +55,10 @@ function ui_draw.getScanResult()
     if machine then return machine.getScanResult() end
     return { total = 0, host = 0, units = {} }
 end
-
 function ui_draw.getLevelMachineCount(level)
     local sr = ui_draw.getScanResult()
     return (sr.units and sr.units[level]) or 0
 end
-
 -- ==================== 基础绘制工具 ====================
 function ui_draw.drawBorder(x, y, w, h, color)
     UI.gpu.setForeground(color)
@@ -73,14 +70,12 @@ function ui_draw.drawBorder(x, y, w, h, color)
     end
     UI.gpu.set(x, y + h - 1, "└" .. string.rep("─", w-2) .. "┘")
 end
-
 function ui_draw.drawText(x, y, text, color)
     color = color or UI.COLORS.TEXT
     UI.gpu.setForeground(color)
     UI.gpu.setBackground(UI.COLORS.BG)
     UI.gpu.set(x, y, text)
 end
-
 function ui_draw.drawButton(x, y, w, text, color, bgColor)
     bgColor = bgColor or UI.COLORS.BTN_BG
     color = color or UI.COLORS.TEXT
@@ -90,18 +85,15 @@ function ui_draw.drawButton(x, y, w, text, color, bgColor)
     UI.gpu.set(x, y, string.rep(" ", padding) .. text .. string.rep(" ", w - padding - unicode.len(text)))
     UI.gpu.setBackground(UI.COLORS.BG)
 end
-
 function ui_draw.appendLog(text)
     table.insert(UI.logLines, text)
     if #UI.logLines > UI.maxLogLines then
         table.remove(UI.logLines, 1)
     end
 end
-
 function ui_draw.clearLog()
     UI.logLines = {}
 end
-
 -- ==================== 布局计算 ====================
 function ui_draw.calculateLayout()
     UI.W, UI.H = UI.gpu.getResolution()
@@ -112,25 +104,14 @@ function ui_draw.calculateLayout()
     local upperH = math.floor(totalContentH * 0.5)
     local lowerH = totalContentH - upperH
     local ctrlW = math.floor(UI.W * 0.3)
-    
     UI.areas.control = { x=2, y=contentStartY, w=ctrlW, h=upperH }
     UI.areas.status = { x=ctrlW + 3, y=contentStartY, w=UI.W - ctrlW - 4, h=upperH }
     UI.areas.chart = { x=2, y=contentStartY + upperH + 1, w=ctrlW, h=lowerH - 1 }
-    
-    -- 右下拆分：日志区 + 配置输入区
-    local rightBottomX = ctrlW + 3
-    local rightBottomW = UI.W - ctrlW - 4
-    local configW = math.floor(rightBottomW * 0.35)
-    local logW = rightBottomW - configW - 1
-    
-    UI.areas.log = { x=rightBottomX, y=contentStartY + upperH + 1, w=logW, h=lowerH - 1 }
-    UI.areas.config = { x=rightBottomX + logW + 1, y=contentStartY + upperH + 1, w=configW, h=lowerH - 1 }
-    
+    UI.areas.log = { x=ctrlW + 3, y=contentStartY + upperH + 1, w=UI.W - ctrlW - 4, h=lowerH - 1 }
     UI.areas.report = { x=2, y=contentStartY, w=UI.W - 4, h=totalContentH - 1 }
     UI.maxLogLines = lowerH - 3
     UI.render.forceAll = true
 end
-
 -- ==================== 面板绘制 ====================
 function ui_draw.drawTitle()
     local area = UI.areas.title
@@ -139,7 +120,6 @@ function ui_draw.drawTitle()
     local title = "净化水线总控系统 v4.3"
     ui_draw.drawText(math.floor((area.w - unicode.len(title))/2), area.y + 1, title, UI.COLORS.TEXT_CYAN)
 end
-
 function ui_draw.drawTabBar()
     local area = UI.areas.tabBar
     local tabW = 12
@@ -154,7 +134,6 @@ function ui_draw.drawTabBar()
         x = x + tabW + 1
     end
 end
-
 function ui_draw.drawControlPanel()
     local area = UI.areas.control
     local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
@@ -246,7 +225,6 @@ function ui_draw.drawControlPanel()
         ui_draw.drawButton(area.x+3, y, btnW, "全力模式", UI.COLORS.TEXT, fpBg)
     end
 end
-
 function ui_draw.drawStatusPanel()
     local area = UI.areas.status
     local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
@@ -267,18 +245,9 @@ function ui_draw.drawStatusPanel()
         local target = math.max((cfg and cfg.enabled and cfg.threshold or 0),
             CONFIG.CALCULATED.MINIMUM_STOCK[level] or 0)
         UI.levelRows[level] = { x=area.x+2, y=y, w=area.w-4, h=rowH }
-
-        -- 左侧：等级 + 水量
         local leftText = string.format("T%d级水 | %s / %s", level,
             utils.formatShortNumber(current), utils.formatShortNumber(target))
-        
-        -- 中间：总并行 / 单台并行
-        local totalParallel = CONFIG.CALCULATED.LEVEL_TOTAL_PARALLEL[level] or 0
-        local singleParallel = CONFIG.CALCULATED.SUGGEST_SINGLE_PARALLEL[level] or 0
-        local midText = string.format("总并行:%s | 单台:%s", 
-            utils.formatShortNumber(totalParallel), utils.formatShortNumber(singleParallel))
-        
-        -- 右侧：机器数 + 状态
+        ui_draw.drawText(barX, y, leftText, UI.COLORS.TEXT)
         local statusText, statusColor
         if machineCount == 0 then
             statusText = "未部署"; statusColor = UI.COLORS.TEXT_RED
@@ -287,15 +256,11 @@ function ui_draw.drawStatusPanel()
         else
             statusText = "已停止"; statusColor = UI.COLORS.TEXT_YELLOW
         end
-        local rightPrefix = string.format("部署：%d台 | ", machineCount)
+        local rightPrefix = string.format("部署机器数：%d台 | ", machineCount)
         local totalRightWidth = unicode.wlen(rightPrefix) + unicode.wlen(statusText)
         local rightStartX = rightEdge - totalRightWidth
-        
-        ui_draw.drawText(barX, y, leftText, UI.COLORS.TEXT)
-        ui_draw.drawText(barX + math.floor((barW - unicode.wlen(midText)) / 2), y, midText, UI.COLORS.TEXT_CYAN)
         ui_draw.drawText(rightStartX, y, rightPrefix, UI.COLORS.TEXT)
         ui_draw.drawText(rightStartX + unicode.wlen(rightPrefix), y, statusText, statusColor)
-
         local barY = y + 1
         local percent = target > 0 and math.min(1, current / target) or 0
         local barBgColor
@@ -313,11 +278,12 @@ function ui_draw.drawStatusPanel()
         y = y + rowH
     end
 end
-
 function ui_draw.drawLogPanel()
     local area = UI.areas.log
+    -- 【修复】填充整个日志区域背景，彻底消除旧文字残留
     UI.gpu.setBackground(UI.COLORS.BG)
     UI.gpu.fill(area.x, area.y, area.w, area.h, " ")
+
     local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
     ui_draw.drawBorder(area.x, area.y, area.w, area.h, borderColor)
     ui_draw.drawText(area.x + 2, area.y + 1, "系统日志", UI.COLORS.TEXT_CYAN)
@@ -334,65 +300,6 @@ function ui_draw.drawLogPanel()
         y = y + 1
     end
 end
-
--- 阈值配置面板
-function ui_draw.drawConfigPanel()
-    local area = UI.areas.config
-    local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
-    ui_draw.drawBorder(area.x, area.y, area.w, area.h, borderColor)
-    ui_draw.drawText(area.x + 2, area.y + 1, "阈值配置", UI.COLORS.TEXT_CYAN)
-    
-    local y = area.y + 3
-    local panel = UI.configPanel
-    local innerX = area.x + 2
-    local innerW = area.w - 4
-    
-    -- 等级选择
-    ui_draw.drawText(innerX, y, "编辑等级:", UI.COLORS.TEXT)
-    local levelBg = panel.focus == "level" and UI.COLORS.BTN_BG_HOVER or UI.COLORS.BTN_BG
-    local levelColor = panel.focus == "level" and UI.COLORS.TEXT_CYAN or UI.COLORS.TEXT
-    ui_draw.drawButton(innerX + 8, y, 6, "T" .. panel.selectedLevel, levelColor, levelBg)
-    
-    y = y + 2
-    -- 阈值输入
-    ui_draw.drawText(innerX, y, "阈值(L):", UI.COLORS.TEXT)
-    local valueBg = panel.focus == "value" and UI.COLORS.BTN_BG_HOVER or UI.COLORS.BTN_BG
-    local valueColor = panel.focus == "value" and UI.COLORS.TEXT_CYAN or UI.COLORS.TEXT
-    local displayValue = panel.inputBuffer == "" and "0" or panel.inputBuffer
-    ui_draw.drawButton(innerX + 8, y, innerW - 8, displayValue, valueColor, valueBg)
-    
-    y = y + 2
-    -- 操作提示
-    if not UI.readonly then
-        ui_draw.drawText(innerX, y, "Tab切换焦点", UI.COLORS.TEXT_YELLOW)
-        y = y + 1
-        ui_draw.drawText(innerX, y, "回车确认修改", UI.COLORS.TEXT_YELLOW)
-        y = y + 1
-        ui_draw.drawText(innerX, y, "Backspace删字", UI.COLORS.TEXT_YELLOW)
-    else
-        ui_draw.drawText(innerX, y, "只读模式", UI.COLORS.TEXT_YELLOW)
-        y = y + 1
-        ui_draw.drawText(innerX, y, "不可修改", UI.COLORS.TEXT_YELLOW)
-    end
-    
-    y = y + 2
-    -- 当前阈值显示
-    local cfg = CONFIG.CACHED_CONFIG[panel.selectedLevel]
-    local currentThreshold = cfg and cfg.threshold or 0
-    ui_draw.drawText(innerX, y, "当前阈值:", UI.COLORS.TEXT)
-    y = y + 1
-    ui_draw.drawText(innerX + 2, y, utils.formatNumber(currentThreshold) .. " L", UI.COLORS.TEXT_GREEN)
-    
-    y = y + 2
-    -- 最低保障库存
-    local minStock = CONFIG.CALCULATED.MINIMUM_STOCK[panel.selectedLevel] or 0
-    if minStock > 0 then
-        ui_draw.drawText(innerX, y, "最低保障:", UI.COLORS.TEXT)
-        y = y + 1
-        ui_draw.drawText(innerX + 2, y, utils.formatNumber(minStock) .. " L", UI.COLORS.TEXT_YELLOW)
-    end
-end
-
 function ui_draw.printLevelDetailToLog(level)
     ui_draw.clearLog()
     ui_draw.appendLog(string.format("===== T%d 级净水单元并行计算详情 =====", level))
@@ -422,10 +329,8 @@ function ui_draw.printLevelDetailToLog(level)
         ui_draw.appendLog("该等级未部署有效机器")
     end
 end
-
 -- ==================== 脏区域重绘调度器 ====================
 local SEP = "\x1f"
-
 local function usedPower()
     local u = 0
     if CONFIG.LAST_ACTIVE_LEVEL then
@@ -437,15 +342,12 @@ local function usedPower()
     end
     return u
 end
-
 local function fp_title()
     return tostring(UI.fullPowerMode and 1 or 0)
 end
-
 local function fp_tabBar()
     return UI.currentTab or ""
 end
-
 local function fp_control()
     local sr = ui_draw.getScanResult()
     return table.concat({
@@ -460,7 +362,6 @@ local function fp_control()
         UI.syncStatus or "",
     }, SEP)
 end
-
 local function fp_status()
     local parts = { tostring(UI.fullPowerMode and 1 or 0) }
     for lv = 1, 8 do
@@ -471,13 +372,10 @@ local function fp_status()
             CONFIG.CALCULATED.MINIMUM_STOCK[lv] or 0)
         local mc = ui_draw.getLevelMachineCount(lv)
         local prod = CONFIG.LAST_ACTIVE_LEVEL and CONFIG.LAST_ACTIVE_LEVEL[lv] and 1 or 0
-        local totalPar = CONFIG.CALCULATED.LEVEL_TOTAL_PARALLEL[lv] or 0
-        local singlePar = CONFIG.CALCULATED.SUGGEST_SINGLE_PARALLEL[lv] or 0
-        parts[#parts+1] = lv .. ":" .. cur .. "/" .. tgt .. "/" .. mc .. "/" .. prod .. "/" .. totalPar .. "/" .. singlePar
+        parts[#parts+1] = lv .. ":" .. cur .. "/" .. tgt .. "/" .. mc .. "/" .. prod
     end
     return table.concat(parts, SEP)
 end
-
 local function fp_chart()
     local n = #UI.historyData
     local firstT = n > 0 and UI.historyData[1].time or 0
@@ -494,30 +392,13 @@ local function fp_chart()
         n, firstT, lastT, sum,
     }, SEP)
 end
-
+-- 优化日志指纹，加入首行内容，避免全量替换日志时指纹碰撞
 local function fp_log()
     local n = #UI.logLines
     local first = n > 0 and UI.logLines[1] or ""
     local last = n > 0 and UI.logLines[n] or ""
     return table.concat({ tostring(UI.fullPowerMode and 1 or 0), n, first, last }, SEP)
 end
-
-local function fp_config()
-    local panel = UI.configPanel
-    local cfg = CONFIG.CACHED_CONFIG[panel.selectedLevel]
-    local threshold = cfg and cfg.threshold or 0
-    local minStock = CONFIG.CALCULATED.MINIMUM_STOCK[panel.selectedLevel] or 0
-    return table.concat({
-        tostring(UI.fullPowerMode and 1 or 0),
-        panel.selectedLevel,
-        panel.inputBuffer,
-        panel.focus,
-        threshold,
-        minStock,
-        UI.readonly and 1 or 0
-    }, SEP)
-end
-
 local function fp_report()
     local rp = UI.reportPanel
     local src = rp.timeDimension == "hour" and CONFIG.REPORT.HOUR_DATA or CONFIG.REPORT.DAY_DATA
@@ -532,7 +413,6 @@ local function fp_report()
         rp.timeDimension or "", lv, n, lastVal, firstT, lastT,
     }, SEP)
 end
-
 local PANELS = {
     title  = { draw = function() ui_draw.drawTitle() end,  fp = fp_title },
     tabBar = { draw = function() ui_draw.drawTabBar() end, fp = fp_tabBar },
@@ -540,19 +420,15 @@ local PANELS = {
     status = { draw = function() ui_draw.drawStatusPanel() end, fp = fp_status },
     chart  = { draw = function() getChart().drawChartPanel() end, fp = fp_chart },
     log    = { draw = function() ui_draw.drawLogPanel() end,  fp = fp_log },
-    config = { draw = function() ui_draw.drawConfigPanel() end, fp = fp_config },
     report = { draw = function() getChart().drawReportPanel() end, fp = fp_report },
 }
-
 local TAB_PANELS = {
-    overview = { "title", "tabBar", "control", "status", "chart", "log", "config" },
+    overview = { "title", "tabBar", "control", "status", "chart", "log" },
     report   = { "title", "tabBar", "report" },
 }
-
 function ui_draw.invalidateAll()
     UI.render.forceAll = true
 end
-
 function ui_draw.renderAll(forceAll)
     forceAll = forceAll or UI.render.forceAll
     local fps = UI.render.fingerprints
@@ -578,5 +454,4 @@ function ui_draw.renderAll(forceAll)
     end
     UI.render.forceAll = false
 end
-
 return ui_draw
