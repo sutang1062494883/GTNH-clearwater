@@ -3,7 +3,6 @@
 local computer = require("computer")
 local cfgModule = require("config")
 local CONFIG = cfgModule.CONFIG
--- 软依赖：监控端无业务模块时自动降级，不影响UI交互
 local ok_machine, machine = pcall(require, "machine")
 if not ok_machine then machine = nil end
 local ok_scheduler, scheduler = pcall(require, "scheduler")
@@ -18,7 +17,7 @@ function interaction.handleClick(x, y, redrawAll)
     -- 全局标签切换
     if UI.tabButtons then
         for id, btn in pairs(UI.tabButtons) do
-            if x >= btn.x and x < btn.x + btn.w and y >= btn.y and y < btn.y + btn.h then
+            if x >= btn.x and x < btn.x+btn.w and y >= btn.y and y < btn.y+btn.h then
                 if UI.currentTab ~= id then
                     UI.currentTab = id
                     redrawAll()
@@ -30,7 +29,7 @@ function interaction.handleClick(x, y, redrawAll)
     -- 报表页交互
     if UI.currentTab == "report" then
         for name, btn in pairs(UI.reportPanel.tabButtons) do
-            if x >= btn.x and x < btn.x + btn.w and y >= btn.y and y < btn.y + btn.h then
+            if x >= btn.x and x < btn.x+btn.w and y >= btn.y and y < btn.y+btn.h then
                 if btn.action == "time_hour" then
                     UI.reportPanel.timeDimension = "hour"
                 elseif btn.action == "time_day" then
@@ -50,7 +49,7 @@ function interaction.handleClick(x, y, redrawAll)
     -- 总览页控制按钮（只读模式下不响应）
     if not UI.readonly then
         for name, btn in pairs(UI.buttons) do
-            if x >= btn.x and x < btn.x + btn.w and y >= btn.y and y < btn.y + btn.h then
+            if x >= btn.x and x < btn.x+btn.w and y >= btn.y and y < btn.y+btn.h then
                 if btn.action == "start" then
                     interaction._handleStart()
                 elseif btn.action == "refresh" then
@@ -63,21 +62,22 @@ function interaction.handleClick(x, y, redrawAll)
             end
         end
     end
-    -- 等级行点击查看详情
+    -- 等级行点击 -> 并行面板详情
     for level, row in pairs(UI.levelRows) do
-        if x >= row.x and x < row.x + row.w and y >= row.y and y < row.y + row.h then
-            ui_draw.printLevelDetailToLog(level)
-            UI.chartMode = "detail"
-            UI.currentDetailLevel = level
-            UI.detailSwitchTime = computer.uptime()
-            redrawAll()
+        if x >= row.x and x < row.x+row.w and y >= row.y and y < row.y+row.h then
+            if UI.currentTab == "overview" then
+                UI.parallelMode = "detail"
+                UI.parallelDetailLevel = level
+                UI.parallelDetailSwitchTime = computer.uptime()
+                redrawAll()
+            end
             return
         end
     end
-    -- 图表区点击返回总览
+    -- 图表区点击 -> 返回总览（仅图表自己的详情模式）
     local chartArea = UI.areas.chart
-    if chartArea and x >= chartArea.x and x < chartArea.x + chartArea.w
-        and y >= chartArea.y and y < chartArea.y + chartArea.h then
+    if chartArea and x >= chartArea.x and x < chartArea.x+chartArea.w
+        and y >= chartArea.y and y < chartArea.y+chartArea.h then
         if UI.chartMode == "detail" then
             UI.chartMode = "overview"
             UI.currentDetailLevel = nil
