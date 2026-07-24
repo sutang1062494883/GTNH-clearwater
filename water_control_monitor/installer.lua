@@ -1,7 +1,3 @@
-
-登录大学搜题酱
-打开大学搜题酱App，在
-「我的」页，点击「扫一扫」
 -- installer.lua  (OpenComputers) —— 监控端 (monitor 分支) 安装器
 -- 用系统 wget 下载，最稳
 
