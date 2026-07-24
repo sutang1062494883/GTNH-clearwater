@@ -39,7 +39,7 @@ local function main()
     end
     ensureDir(APP_DIR)
 
-    print("== 净化水线总控系统 安装器 (wget 版) ==")
+    print("== 净化水线总控系统 安装器 ==")
     print("源:       " .. BASE_URL)
     print("目标目录: " .. APP_DIR)
     print()
@@ -71,11 +71,11 @@ local function main()
     if #fail > 0 then
         print("以下文件失败:")
         for _, m in ipairs(fail) do print("  - " .. m) end
-        error("安装未完全成功。若提示 404/文件为空，请去 GitHub 确认这些文件已 push 到 master 分支的 water_control/ 目录。")
+        error("安装未完全成功。请检查网络环境")
     end
 
     print()
-    print("启动:lua " .. APP_DIR .. "/main.lua")
+    print("请按照wiki中所写步骤执行程序")
 end
 
 local ok, err = xpcall(main, debug.traceback)   -- 不要 pcall 吞错
