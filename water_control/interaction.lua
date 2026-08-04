@@ -62,22 +62,29 @@ function interaction.handleClick(x, y, redrawAll)
             end
         end
     end
-    -- 等级行点击 -> 并行面板详情 + 图表区趋势（同时切换）
+    -- ★ 修改：等级行点击只切换图表区，不再联动并行面板
     for level, row in pairs(UI.levelRows) do
         if x >= row.x and x < row.x+row.w and y >= row.y and y < row.y+row.h then
             if UI.currentTab == "overview" then
-                UI.parallelMode = "detail"
-                UI.parallelDetailLevel = level
-                UI.parallelDetailSwitchTime = computer.uptime()
-
-                -- 【关键修复】图表区也切换到该等级的详细趋势
+                -- 仅图表区切换到该等级详细趋势
                 UI.chartMode = "detail"
                 UI.currentDetailLevel = level
                 UI.detailSwitchTime = computer.uptime()
-
                 redrawAll()
             end
             return
+        end
+    end
+    -- ★ 新增：并行卡片点击（仅在并行概况模式）
+    if UI.currentTab == "overview" and UI.parallelMode == "overview" and UI.parallelCards then
+        for level, card in pairs(UI.parallelCards) do
+            if x >= card.x and x < card.x + card.w and y >= card.y and y < card.y + card.h then
+                UI.parallelMode = "detail"
+                UI.parallelDetailLevel = level
+                UI.parallelDetailSwitchTime = computer.uptime()
+                redrawAll()
+                return
+            end
         end
     end
     -- 图表区点击 -> 返回总览（仅图表自己的详情模式）
@@ -87,6 +94,17 @@ function interaction.handleClick(x, y, redrawAll)
         if UI.chartMode == "detail" then
             UI.chartMode = "overview"
             UI.currentDetailLevel = nil
+            redrawAll()
+            return
+        end
+    end
+    -- ★ 新增：并行面板空白点击（详情模式返回概况）
+    local parallelArea = UI.areas.parallel
+    if parallelArea and x >= parallelArea.x and x < parallelArea.x + parallelArea.w
+        and y >= parallelArea.y and y < parallelArea.y + parallelArea.h then
+        if UI.parallelMode == "detail" then
+            UI.parallelMode = "overview"
+            UI.parallelDetailLevel = nil
             redrawAll()
             return
         end
