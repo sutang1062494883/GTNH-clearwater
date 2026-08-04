@@ -62,13 +62,19 @@ function interaction.handleClick(x, y, redrawAll)
             end
         end
     end
-    -- 等级行点击 -> 并行面板详情
+    -- 等级行点击 -> 并行面板详情 + 图表区趋势（同时切换）
     for level, row in pairs(UI.levelRows) do
         if x >= row.x and x < row.x+row.w and y >= row.y and y < row.y+row.h then
             if UI.currentTab == "overview" then
                 UI.parallelMode = "detail"
                 UI.parallelDetailLevel = level
                 UI.parallelDetailSwitchTime = computer.uptime()
+
+                -- 【关键修复】图表区也切换到该等级的详细趋势
+                UI.chartMode = "detail"
+                UI.currentDetailLevel = level
+                UI.detailSwitchTime = computer.uptime()
+
                 redrawAll()
             end
             return
