@@ -87,7 +87,8 @@ local function main()
     ui_draw.appendLog("[提示] 等待控制端同步数据...")
     ui_draw.appendLog("[提示] 点击顶部标签切换总览/详细报表")
     ui_draw.appendLog("[提示] 点击等级行查看并行参数与短时趋势")
-
+    ui_draw.appendLog("[提示] 点击水等级行查看具体水量变化趋势")
+    ui_draw.appendLog("[提示] 点击并行总览对应等级区域查看具体并行")
     -- 首次全量渲染
     ui_draw.renderAll(true)
     mainLoop()
