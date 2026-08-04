@@ -138,7 +138,7 @@ function ui_draw.drawTitle()
     UI.gpu.fill(area.x, area.y, area.w, area.h, " ")
     local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
     ui_draw.drawBorder(area.x, area.y, area.w, area.h, borderColor)
-    local title = "净化水线总控系统 v4.3"
+    local title = "净化水线总控系统 v4.4"
     ui_draw.drawText(math.floor((area.w - unicode.len(title))/2), area.y+1, title, UI.COLORS.TEXT_CYAN)
 end
 
@@ -253,6 +253,7 @@ function ui_draw.drawControlPanel()
     end
 end
 
+-- 状态面板：增加成功率显示，且两位数前补空格对齐
 function ui_draw.drawStatusPanel()
     local area = UI.areas.status
     UI.gpu.setBackground(UI.COLORS.BG)
@@ -286,7 +287,21 @@ function ui_draw.drawStatusPanel()
         else
             statusText = "已停止"; statusColor = UI.COLORS.TEXT_YELLOW
         end
-        local rightPrefix = string.format("部署机器数：%d台 | ", machineCount)
+        -- 读取成功率
+        local successRate
+        if machine then
+            successRate = machine.getMachineStats(level)
+        end
+        local rateText = "--"
+        if successRate ~= nil then
+            if successRate <= 1 then successRate = successRate * 100 end
+            rateText = string.format("%.0f%%", successRate)
+            -- 两位数十位补空格对齐100%
+            if #rateText == 3 then
+                rateText = " " .. rateText
+            end
+        end
+        local rightPrefix = string.format("成功率：%s | 部署机器数：%d台 | ", rateText, machineCount)
         local totalRightWidth = unicode.wlen(rightPrefix) + unicode.wlen(statusText)
         local rightStartX = rightEdge - totalRightWidth
         ui_draw.drawText(rightStartX, y, rightPrefix, UI.COLORS.TEXT)
@@ -378,6 +393,18 @@ local function getLevelDetailLines(level)
         table.insert(lines, string.format("单台功耗：%s EU/t (%s%s)", utils.formatNumber(calc.SINGLE_MACHINE_POWER[level] or 0), currMachine, voltMachine))
         table.insert(lines, string.format("该等级全开总功耗：%s EU/t (%s%s)", utils.formatNumber(calc.LEVEL_TOTAL_POWER[level] or 0), currLevel, voltLevel))
         table.insert(lines, string.format("该等级总并行数：%s", utils.formatNumber(calc.LEVEL_TOTAL_PARALLEL[level] or 0)))
+
+        -- 实际成功率和并行数
+        if machine then
+            local successRate, actualParallel = machine.getMachineStats(level)
+            if successRate ~= nil then
+                if successRate <= 1 then successRate = successRate * 100 end
+                table.insert(lines, string.format("当前成功率：%.1f%%", successRate))
+            end
+            if actualParallel ~= nil then
+                table.insert(lines, string.format("实际单台并行数：%s", utils.formatNumber(actualParallel)))
+            end
+        end
     else
         table.insert(lines, "该等级未部署有效机器")
     end
@@ -409,7 +436,7 @@ function ui_draw.drawParallelPanel()
         end
     else
         -- 概况模式：两列四行，防溢出
-        ui_draw.drawText(area.x+2, area.y+1, "并行概况", UI.COLORS.TEXT_CYAN)
+        ui_draw.drawText(area.x+2, area.y+1, "并行概况（当前并行/应设并行）", UI.COLORS.TEXT_CYAN)
         local gridX = area.x + 2
         local gridY = area.y + 3
         local gridW = area.w - 4
@@ -436,6 +463,9 @@ function ui_draw.drawParallelPanel()
         -- 水蓝色运行底纹（仅用于“运行中”）
         local WATER_BLUE = 0x0ea5e9
 
+        -- 重置可点击卡片区域表
+        UI.parallelCards = {}
+
         for level = 1, 8 do
             local row = (level - 1) % rows
             local col = math.floor((level - 1) / rows)
@@ -448,7 +478,7 @@ function ui_draw.drawParallelPanel()
             local isActive = CONFIG.LAST_ACTIVE_LEVEL and CONFIG.LAST_ACTIVE_LEVEL[level]
             local isDeployed = machineCount > 0
 
-            -- ★ 底纹规则：与八级水状态栏完全一致，但“运行中”改为水蓝色
+            -- 底纹规则：与八级水状态栏完全一致，但“运行中”改为水蓝色
             local cardBgColor
             if not isDeployed then
                 cardBgColor = UI.COLORS.BAR_BG_NONE      -- 深红
@@ -458,7 +488,7 @@ function ui_draw.drawParallelPanel()
                 cardBgColor = UI.COLORS.BAR_BG_IDLE      -- 灰色（待机/停止）
             end
 
-            -- ★ 边框颜色根据底纹微调，更精致
+            -- 边框颜色根据底纹微调，更精致
             local cardBorderColor
             if not isDeployed then
                 cardBorderColor = 0xff6b6b   -- 浅红
@@ -491,9 +521,13 @@ function ui_draw.drawParallelPanel()
                 ui_draw.drawText(machineX, cy + 2, machineText, CARD_TEXT, cardBgColor)
             end
             if cellH >= 4 then
-                local parallelText = string.format("%s/%s",
-                    utils.formatShortNumber(suggestSingle),
-                    utils.formatShortNumber(totalParallel))
+                -- 显示 实际并行数/单台目标并行数
+                local actualParallel = nil
+                if machine then
+                    _, actualParallel = machine.getMachineStats(level)
+                end
+                local actualText = actualParallel and utils.formatNumber(actualParallel) or "--"
+                local parallelText = string.format("%s/%s", actualText, utils.formatShortNumber(suggestSingle))
                 local parallelX = innerX + math.floor((innerW - unicode.wlen(parallelText)) / 2)
                 ui_draw.drawText(parallelX, cy + 3, parallelText, CARD_TEXT, cardBgColor)
             end
@@ -513,6 +547,9 @@ function ui_draw.drawParallelPanel()
                 local tagX = innerX + math.floor((innerW - unicode.wlen(tagText)) / 2)
                 ui_draw.drawText(tagX, cy + 4, tagText, tagColor, cardBgColor)
             end
+
+            -- 保存卡片点击区域
+            UI.parallelCards[level] = { x = cx, y = cy, w = cellW, h = cellH }
         end
     end
 end
@@ -555,7 +592,13 @@ local function fp_status()
         local tgt = math.max((cfg and cfg.enabled and cfg.threshold or 0), CONFIG.CALCULATED.MINIMUM_STOCK[lv] or 0)
         local mc = ui_draw.getLevelMachineCount(lv)
         local prod = CONFIG.LAST_ACTIVE_LEVEL and CONFIG.LAST_ACTIVE_LEVEL[lv] and 1 or 0
-        parts[#parts+1] = lv .. ":" .. cur .. "/" .. tgt .. "/" .. mc .. "/" .. prod
+        -- 成功率也加入指纹，确保变化时重绘
+        local sr = 0
+        if machine then
+            local s = machine.getMachineStats(lv)
+            if s ~= nil then sr = s end
+        end
+        parts[#parts+1] = lv .. ":" .. cur .. "/" .. tgt .. "/" .. mc .. "/" .. prod .. "/" .. sr
     end
     return table.concat(parts, SEP)
 end
@@ -599,7 +642,12 @@ local function fp_parallel()
         local ss = CONFIG.CALCULATED.SUGGEST_SINGLE_PARALLEL[lv] or 0
         local tp = CONFIG.CALCULATED.LEVEL_TOTAL_PARALLEL[lv] or 0
         local act = CONFIG.LAST_ACTIVE_LEVEL and CONFIG.LAST_ACTIVE_LEVEL[lv] and 1 or 0
-        parts[#parts+1] = table.concat({lv, mc, ss, tp, act}, ":")
+        local ap = 0
+        if machine then
+            local _, a = machine.getMachineStats(lv)
+            if a ~= nil then ap = a end
+        end
+        parts[#parts+1] = table.concat({lv, mc, ss, tp, act, ap}, ":")
     end
     return table.concat(parts, SEP)
 end
