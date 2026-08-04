@@ -2,6 +2,7 @@
 -- 机器扫描、功率计算、等级参数计算
 
 local component = require("component")
+local computer = require("computer")
 local cfgModule = require("config")
 local CONFIG = cfgModule.CONFIG
 local CONST = cfgModule.CONST
@@ -14,8 +15,66 @@ for level = 0, 8 do machines[level] = { proxies = {} } end
 
 local MACHINE_SCAN_RESULT = { total = 0, host = 0, units = {} }
 
+-- 新增：传感器信息缓存（避免频繁调用）
+local statsCache = {}
+local STATS_CACHE_TTL = 5  -- 秒
+
 function machine.getMachines() return machines end
 function machine.getScanResult() return MACHINE_SCAN_RESULT end
+
+-- 读取某等级第一台机器的成功率和实际并行数（带缓存）
+function machine.getMachineStats(level)
+    local now = computer.uptime()
+    local cache = statsCache[level]
+    if cache and now - cache.time < STATS_CACHE_TTL then
+        return cache.successRate, cache.actualParallel
+    end
+
+    local successRate, actualParallel = nil, nil
+    local proxies = machines[level] and machines[level].proxies
+    if proxies then
+        for _, proxy in ipairs(proxies) do
+            if proxy.getSensorInformation then
+                local ok, result = pcall(proxy.getSensorInformation)
+                if ok and type(result) == "table" then
+                    for _, line in ipairs(result) do
+                        local clean = line:gsub("§.", "")
+                        -- 解析成功率
+                        if successRate == nil then
+                            if clean:lower():find("success") or clean:find("成功率") or clean:find("成功") then
+                                local num = clean:match("(%d+%.?%d*)%s*%%")
+                                if num then
+                                    successRate = tonumber(num)
+                                else
+                                    num = clean:match("(%d+%.?%d*)")
+                                    if num then successRate = tonumber(num) end
+                                end
+                            end
+                        end
+                        -- 解析实际并行数
+                        if actualParallel == nil then
+                            if clean:lower():find("parallel") or clean:find("并行") or clean:find("并联") then
+                                local num = clean:match("(%d[%d,]*)")
+                                if num then
+                                    num = num:gsub(",", "")
+                                    actualParallel = tonumber(num)
+                                end
+                            end
+                        end
+                        if successRate and actualParallel then break end
+                    end
+                end
+            end
+            if successRate and actualParallel then break end
+        end
+    end
+
+    -- 若只找到一种数据，也尝试缓存
+    if successRate ~= nil or actualParallel ~= nil then
+        statsCache[level] = { successRate = successRate, actualParallel = actualParallel, time = now }
+    end
+    return successRate, actualParallel
+end
 
 function machine.scanAndCalculateTotalPower()
     local totalPower = 0
