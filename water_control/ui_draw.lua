@@ -58,6 +58,20 @@ function ui_draw.getLevelMachineCount(level)
     return (sr.units and sr.units[level]) or 0
 end
 
+-- ★ 新增：获取某等级成功率/并行数，优先使用无线同步缓存，其次本地读取
+local function getMachineStatsCached(level)
+    local sr, ap = nil, nil
+    if UI._runtime and UI._runtime.machineStats and UI._runtime.machineStats[level] then
+        local s = UI._runtime.machineStats[level]
+        sr = s.successRate
+        ap = s.actualParallel
+    end
+    if sr == nil and ap == nil and machine then
+        sr, ap = machine.getMachineStats(level)
+    end
+    return sr, ap
+end
+
 -- ========= 基础绘制工具 =========
 function ui_draw.drawBorder(x, y, w, h, color, bgColor)
     color = color or UI.COLORS.BORDER
@@ -287,11 +301,8 @@ function ui_draw.drawStatusPanel()
         else
             statusText = "已停止"; statusColor = UI.COLORS.TEXT_YELLOW
         end
-        -- 读取成功率
-        local successRate
-        if machine then
-            successRate = machine.getMachineStats(level)
-        end
+        -- 读取成功率（优先使用缓存）
+        local successRate = getMachineStatsCached(level)
         local rateText = "--"
         if successRate ~= nil then
             if successRate <= 1 then successRate = successRate * 100 end
@@ -375,7 +386,7 @@ end
 local function getLevelDetailLines(level)
     local lines = {}
     table.insert(lines, string.rep("=", 30))
-    table.insert(lines, string.format("T%d 级净水单元并行计算详情", level))
+    table.insert(lines, string.format("T%d 级净水单元详情", level))
     table.insert(lines, string.rep("=", 30))
     local deployedCount = ui_draw.getLevelMachineCount(level)
     local powerPerParallel = CONST.POWER_LEVELS[level] or 0
@@ -394,16 +405,14 @@ local function getLevelDetailLines(level)
         table.insert(lines, string.format("该等级全开总功耗：%s EU/t (%s%s)", utils.formatNumber(calc.LEVEL_TOTAL_POWER[level] or 0), currLevel, voltLevel))
         table.insert(lines, string.format("该等级总并行数：%s", utils.formatNumber(calc.LEVEL_TOTAL_PARALLEL[level] or 0)))
 
-        -- 实际成功率和并行数
-        if machine then
-            local successRate, actualParallel = machine.getMachineStats(level)
-            if successRate ~= nil then
-                if successRate <= 1 then successRate = successRate * 100 end
-                table.insert(lines, string.format("当前成功率：%.1f%%", successRate))
-            end
-            if actualParallel ~= nil then
-                table.insert(lines, string.format("实际单台并行数：%s", utils.formatNumber(actualParallel)))
-            end
+        -- 实际成功率和并行数（使用缓存）
+        local successRate, actualParallel = getMachineStatsCached(level)
+        if successRate ~= nil then
+            if successRate <= 1 then successRate = successRate * 100 end
+            table.insert(lines, string.format("当前成功率：%.1f%%", successRate))
+        end
+        if actualParallel ~= nil then
+            table.insert(lines, string.format("实际单台并行数：%s", utils.formatNumber(actualParallel)))
         end
     else
         table.insert(lines, "该等级未部署有效机器")
@@ -521,11 +530,8 @@ function ui_draw.drawParallelPanel()
                 ui_draw.drawText(machineX, cy + 2, machineText, CARD_TEXT, cardBgColor)
             end
             if cellH >= 4 then
-                -- 显示 实际并行数/单台目标并行数
-                local actualParallel = nil
-                if machine then
-                    _, actualParallel = machine.getMachineStats(level)
-                end
+                -- 显示 实际并行数/单台目标并行数（使用缓存）
+                local _, actualParallel = getMachineStatsCached(level)
                 local actualText = actualParallel and utils.formatNumber(actualParallel) or "--"
                 local parallelText = string.format("%s/%s", actualText, utils.formatShortNumber(suggestSingle))
                 local parallelX = innerX + math.floor((innerW - unicode.wlen(parallelText)) / 2)
@@ -592,12 +598,10 @@ local function fp_status()
         local tgt = math.max((cfg and cfg.enabled and cfg.threshold or 0), CONFIG.CALCULATED.MINIMUM_STOCK[lv] or 0)
         local mc = ui_draw.getLevelMachineCount(lv)
         local prod = CONFIG.LAST_ACTIVE_LEVEL and CONFIG.LAST_ACTIVE_LEVEL[lv] and 1 or 0
-        -- 成功率也加入指纹，确保变化时重绘
+        -- 成功率加入指纹，确保变化时重绘
         local sr = 0
-        if machine then
-            local s = machine.getMachineStats(lv)
-            if s ~= nil then sr = s end
-        end
+        local s = getMachineStatsCached(lv)
+        if s ~= nil then sr = s end
         parts[#parts+1] = lv .. ":" .. cur .. "/" .. tgt .. "/" .. mc .. "/" .. prod .. "/" .. sr
     end
     return table.concat(parts, SEP)
@@ -643,10 +647,8 @@ local function fp_parallel()
         local tp = CONFIG.CALCULATED.LEVEL_TOTAL_PARALLEL[lv] or 0
         local act = CONFIG.LAST_ACTIVE_LEVEL and CONFIG.LAST_ACTIVE_LEVEL[lv] and 1 or 0
         local ap = 0
-        if machine then
-            local _, a = machine.getMachineStats(lv)
-            if a ~= nil then ap = a end
-        end
+        local _, a = getMachineStatsCached(lv)
+        if a ~= nil then ap = a end
         parts[#parts+1] = table.concat({lv, mc, ss, tp, act, ap}, ":")
     end
     return table.concat(parts, SEP)
