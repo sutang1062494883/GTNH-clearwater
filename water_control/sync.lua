@@ -7,6 +7,10 @@ local cfgModule = require("config")
 local CONFIG = cfgModule.CONFIG
 local UI = require("ui_config")
 
+-- 软依赖 machine：仅主控端加载，监控端缺失时不影响功能
+local ok_machine, machine = pcall(require, "machine")
+if not ok_machine then machine = nil end
+
 local sync = {}
 
 local function cloneData(src, seen)
@@ -25,6 +29,15 @@ end
 
 function sync.collectSnapshot(runtime)
     runtime = runtime or {}
+    -- 收集每等级成功率/实际并行数
+    local machineStats = {}
+    if machine then
+        for lv = 1, 8 do
+            local sr, ap = machine.getMachineStats(lv)
+            machineStats[lv] = { successRate = sr, actualParallel = ap }
+        end
+    end
+
     local snap = {
         v = CONFIG.SYNC.VERSION,
         t = computer.uptime(),
@@ -47,6 +60,7 @@ function sync.collectSnapshot(runtime)
         plantRunning = runtime.plantRunning or false,
         scanResult = cloneData(runtime.scanResult or {}),
         fluidCache = cloneData(runtime.fluidCache or {}),
+        machineStats = machineStats,   -- ★ 新增：成功率/并行数快照
     }
     return snap
 end
@@ -87,6 +101,8 @@ function sync.applySnapshot(snap)
     UI._runtime.plantRunning = snap.plantRunning or false
     UI._runtime.scanResult = snap.scanResult or { total = 0, host = 0, units = {} }
     UI._runtime.fluidCache = snap.fluidCache or {}
+    -- ★ 新增：缓存同步过来的成功率/并行数
+    UI._runtime.machineStats = snap.machineStats or {}
     
     UI._runtime.enabled = true   -- 镜像端：启用运行时缓存通道
     UI._lastSyncTime = computer.uptime()
