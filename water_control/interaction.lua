@@ -129,6 +129,10 @@ function interaction._handleRefresh()
     if not machine or not scheduler or not report then return end
     ui_draw.appendLog("[系统] 执行全量刷新扫描")
     pcall(function()
+        -- ★ 新增：清除传感器解析缓存，确保重新读取真实并行/成功率
+        if machine.invalidateStatsCache then
+            machine.invalidateStatsCache()
+        end
         machine.initializeMachinesAndPower()
         machine.loadCacheConfigFromRequesters()
         machine.calculateAndSaveLevelParams()
