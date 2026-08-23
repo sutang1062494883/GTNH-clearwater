@@ -152,7 +152,7 @@ function ui_draw.drawTitle()
     UI.gpu.fill(area.x, area.y, area.w, area.h, " ")
     local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
     ui_draw.drawBorder(area.x, area.y, area.w, area.h, borderColor)
-    local title = "净化水线总控系统 v4.4"
+    local title = "净化水线总控系统 v4.5"
     ui_draw.drawText(math.floor((area.w - unicode.len(title))/2), area.y+1, title, UI.COLORS.TEXT_CYAN)
 end
 
@@ -234,6 +234,19 @@ function ui_draw.drawControlPanel()
     local useCurrStr, useVoltStr = utils.getGTInfo(currentUsedPower)
     ui_draw.drawText(area.x+12, y, useCurrStr, UI.COLORS.TEXT_GREEN)
     ui_draw.drawText(area.x+12 + unicode.wlen(useCurrStr), y, useVoltStr, UI.COLORS.TEXT_PURPLE)
+
+    -- ★ 接口情况（仅显示连接状态）
+    y = y + 1
+    local meConnected = false
+    if machine and machine.getMEInterfaceStatus then
+        meConnected = machine.getMEInterfaceStatus()
+    end
+    ui_draw.drawText(area.x+2, y, "接口情况：", UI.COLORS.TEXT)
+    local connText = meConnected and "已连接" or "未连接"
+    local connColor = meConnected and UI.COLORS.TEXT_GREEN or UI.COLORS.TEXT_RED
+    ui_draw.drawText(area.x+12, y, connText, connColor)
+
+    -- 后续原有内容
     y = y + 1
     local scanResult = ui_draw.getScanResult()
     ui_draw.drawText(area.x+2, y, "部署机器：", UI.COLORS.TEXT)
@@ -267,7 +280,6 @@ function ui_draw.drawControlPanel()
     end
 end
 
--- 状态面板：增加成功率显示，且两位数前补空格对齐
 function ui_draw.drawStatusPanel()
     local area = UI.areas.status
     UI.gpu.setBackground(UI.COLORS.BG)
@@ -301,13 +313,11 @@ function ui_draw.drawStatusPanel()
         else
             statusText = "已停止"; statusColor = UI.COLORS.TEXT_YELLOW
         end
-        -- 读取成功率（优先使用缓存）
         local successRate = getMachineStatsCached(level)
         local rateText = "--"
         if successRate ~= nil then
             if successRate <= 1 then successRate = successRate * 100 end
             rateText = string.format("%.0f%%", successRate)
-            -- 两位数十位补空格对齐100%
             if #rateText == 3 then
                 rateText = " " .. rateText
             end
@@ -335,7 +345,6 @@ function ui_draw.drawStatusPanel()
     end
 end
 
--- 辅助函数：按显示宽度拆行
 local function wrapText(text, maxWidth)
     local lines = {}
     local currentLine = ""
@@ -382,7 +391,6 @@ function ui_draw.drawLogPanel()
     end
 end
 
--- ========= 并行面板（两列四行，状态底色+水蓝运行，白色文字） =========
 local function getLevelDetailLines(level)
     local lines = {}
     table.insert(lines, string.rep("=", 30))
@@ -405,7 +413,6 @@ local function getLevelDetailLines(level)
         table.insert(lines, string.format("该等级全开总功耗：%s EU/t (%s%s)", utils.formatNumber(calc.LEVEL_TOTAL_POWER[level] or 0), currLevel, voltLevel))
         table.insert(lines, string.format("该等级总并行数：%s", utils.formatNumber(calc.LEVEL_TOTAL_PARALLEL[level] or 0)))
 
-        -- 实际成功率和并行数（使用缓存）
         local successRate, actualParallel = getMachineStatsCached(level)
         if successRate ~= nil then
             if successRate <= 1 then successRate = successRate * 100 end
@@ -422,14 +429,12 @@ end
 
 function ui_draw.drawParallelPanel()
     local area = UI.areas.parallel
-    -- 清除整个区域
     UI.gpu.setBackground(UI.COLORS.BG)
     UI.gpu.fill(area.x, area.y, area.w, area.h, " ")
     local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
     ui_draw.drawBorder(area.x, area.y, area.w, area.h, borderColor)
 
     if UI.parallelMode == "detail" and UI.parallelDetailLevel then
-        -- 详情模式
         local title = string.format("并行详情 - T%d级", UI.parallelDetailLevel)
         ui_draw.drawText(area.x+2, area.y+1, title, UI.COLORS.TEXT_CYAN)
         local lines = getLevelDetailLines(UI.parallelDetailLevel)
@@ -444,8 +449,7 @@ function ui_draw.drawParallelPanel()
             y = y + 1
         end
     else
-        -- 概况模式：两列四行，防溢出
-        ui_draw.drawText(area.x+2, area.y+1, "并行概况（当前并行/应设并行）", UI.COLORS.TEXT_CYAN)
+        ui_draw.drawText(area.x+2, area.y+1, "并行概况（机器当前并行/机器应设并行）", UI.COLORS.TEXT_CYAN)
         local gridX = area.x + 2
         local gridY = area.y + 3
         local gridW = area.w - 4
@@ -454,10 +458,8 @@ function ui_draw.drawParallelPanel()
 
         local cols, rows = 2, 4
         local gapX, gapY = 2, 1
-
-        -- 动态计算卡片高度，绝不越界
         local maxCellH = math.floor((gridH - gapY * (rows - 1)) / rows)
-        local cellH = math.max(3, math.min(maxCellH, 6))   -- 最少3行，最多6行
+        local cellH = math.max(3, math.min(maxCellH, 6))
         local usedH = cellH * rows + gapY * (rows - 1)
         if usedH > gridH then
             cellH = math.max(3, math.floor((gridH - gapY * (rows - 1)) / rows))
@@ -469,10 +471,7 @@ function ui_draw.drawParallelPanel()
         local offsetX = gridX + math.floor((gridW - usedW) / 2)
         local offsetY = gridY + math.floor((gridH - usedH) / 2)
 
-        -- 水蓝色运行底纹（仅用于“运行中”）
         local WATER_BLUE = 0x0ea5e9
-
-        -- 重置可点击卡片区域表
         UI.parallelCards = {}
 
         for level = 1, 8 do
@@ -483,42 +482,35 @@ function ui_draw.drawParallelPanel()
 
             local machineCount = ui_draw.getLevelMachineCount(level)
             local suggestSingle = CONFIG.CALCULATED.SUGGEST_SINGLE_PARALLEL[level] or 0
-            local totalParallel = CONFIG.CALCULATED.LEVEL_TOTAL_PARALLEL[level] or 0
             local isActive = CONFIG.LAST_ACTIVE_LEVEL and CONFIG.LAST_ACTIVE_LEVEL[level]
             local isDeployed = machineCount > 0
 
-            -- 底纹规则：与八级水状态栏完全一致，但“运行中”改为水蓝色
             local cardBgColor
             if not isDeployed then
-                cardBgColor = UI.COLORS.BAR_BG_NONE      -- 深红
+                cardBgColor = UI.COLORS.BAR_BG_NONE
             elseif isActive then
-                cardBgColor = WATER_BLUE                 -- 水蓝色（运行中）
+                cardBgColor = WATER_BLUE
             else
-                cardBgColor = UI.COLORS.BAR_BG_IDLE      -- 灰色（待机/停止）
+                cardBgColor = UI.COLORS.BAR_BG_IDLE
             end
 
-            -- 边框颜色根据底纹微调，更精致
             local cardBorderColor
             if not isDeployed then
-                cardBorderColor = 0xff6b6b   -- 浅红
+                cardBorderColor = 0xff6b6b
             elseif isActive then
-                cardBorderColor = 0x7dd3fc   -- 浅蓝
+                cardBorderColor = 0x7dd3fc
             else
-                cardBorderColor = 0x94a3b8   -- 浅灰
+                cardBorderColor = 0x94a3b8
             end
 
-            -- 填充卡片背景
             UI.gpu.setBackground(cardBgColor)
             UI.gpu.fill(cx, cy, cellW, cellH, " ")
-
-            -- 绘制边框
             ui_draw.drawBorder(cx, cy, cellW, cellH, cardBorderColor, cardBgColor)
 
             local innerX = cx + 1
             local innerW = cellW - 2
-            local CARD_TEXT = 0xffffff   -- 纯白文字
+            local CARD_TEXT = 0xffffff
 
-            -- 内容绘制（根据可用行数动态显示）
             if cellH >= 2 then
                 local title = "T" .. level
                 local titleX = innerX + math.floor((innerW - unicode.wlen(title)) / 2)
@@ -530,7 +522,6 @@ function ui_draw.drawParallelPanel()
                 ui_draw.drawText(machineX, cy + 2, machineText, CARD_TEXT, cardBgColor)
             end
             if cellH >= 4 then
-                -- 显示 实际并行数/单台目标并行数（使用缓存）
                 local _, actualParallel = getMachineStatsCached(level)
                 local actualText = actualParallel and utils.formatNumber(actualParallel) or "--"
                 local parallelText = string.format("%s/%s", actualText, utils.formatShortNumber(suggestSingle))
@@ -538,11 +529,10 @@ function ui_draw.drawParallelPanel()
                 ui_draw.drawText(parallelX, cy + 3, parallelText, CARD_TEXT, cardBgColor)
             end
             if cellH >= 5 then
-                -- 状态标签（保持彩色以突出显示）
                 local tagText, tagColor
                 if isActive then
                     tagText = "运行中"
-                    tagColor = UI.COLORS.TEXT_GREEN   -- 绿色文字，与蓝底形成对比
+                    tagColor = UI.COLORS.TEXT_GREEN
                 elseif isDeployed then
                     tagText = "待机"
                     tagColor = UI.COLORS.TEXT_YELLOW
@@ -554,7 +544,6 @@ function ui_draw.drawParallelPanel()
                 ui_draw.drawText(tagX, cy + 4, tagText, tagColor, cardBgColor)
             end
 
-            -- 保存卡片点击区域
             UI.parallelCards[level] = { x = cx, y = cy, w = cellW, h = cellH }
         end
     end
@@ -577,6 +566,11 @@ local function fp_title()      return tostring(UI.fullPowerMode and 1 or 0) end
 local function fp_tabBar()     return UI.currentTab or "" end
 local function fp_control()
     local sr = ui_draw.getScanResult()
+    -- 加入接口状态指纹
+    local meConn = 0
+    if machine and machine.getMEInterfaceStatus then
+        meConn = machine.getMEInterfaceStatus() and 1 or 0
+    end
     return table.concat({
         UI.fullPowerMode and 1 or 0,
         UI.systemRunning and 1 or 0,
@@ -587,6 +581,7 @@ local function fp_control()
         sr.total or 0,
         UI.readonly and 1 or 0,
         UI.syncStatus or "",
+        meConn,
     }, SEP)
 end
 local function fp_status()
@@ -598,7 +593,6 @@ local function fp_status()
         local tgt = math.max((cfg and cfg.enabled and cfg.threshold or 0), CONFIG.CALCULATED.MINIMUM_STOCK[lv] or 0)
         local mc = ui_draw.getLevelMachineCount(lv)
         local prod = CONFIG.LAST_ACTIVE_LEVEL and CONFIG.LAST_ACTIVE_LEVEL[lv] and 1 or 0
-        -- 成功率加入指纹，确保变化时重绘
         local sr = 0
         local s = getMachineStatsCached(lv)
         if s ~= nil then sr = s end
