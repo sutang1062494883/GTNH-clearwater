@@ -15,12 +15,59 @@ for level = 0, 8 do machines[level] = { proxies = {} } end
 
 local MACHINE_SCAN_RESULT = { total = 0, host = 0, units = {} }
 
--- 新增：传感器信息缓存（避免频繁调用）
+-- 传感器信息缓存（避免频繁调用）
 local statsCache = {}
 local STATS_CACHE_TTL = 5  -- 秒
 
+-- ★ 新增：每个等级最近一次有效的并行数（>1 才认为是有效）
+local lastValidParallel = {}
+
 function machine.getMachines() return machines end
 function machine.getScanResult() return MACHINE_SCAN_RESULT end
+
+-- 清除传感器缓存（刷新时调用）
+function machine.invalidateStatsCache()
+    statsCache = {}
+    -- 注意：不清除 lastValidParallel，保留历史有效值
+end
+
+-- 获取ME接口连接状态（只返回 connected）
+function machine.getMEInterfaceStatus()
+    local candidates = {"fluid_interface", "me_dual_interface", "me_interface"}
+    local address = nil
+    for _, compType in ipairs(candidates) do
+        local ok_list, iter = pcall(component.list, compType)
+        if ok_list and iter then
+            address = iter()
+            if address then break end
+        end
+    end
+
+    if not address then
+        return false
+    end
+
+    local connected = true
+    local proxy = component.proxy(address)
+    if proxy then
+        local statusMethods = {"isConnected", "getNetworkState", "getNetworkStatus"}
+        for _, method in ipairs(statusMethods) do
+            if type(proxy[method]) == "function" then
+                local ok, res = pcall(proxy[method], proxy)
+                if ok then
+                    if type(res) == "boolean" then
+                        connected = res
+                    elseif type(res) == "table" then
+                        connected = res.connected ~= false
+                    end
+                    break
+                end
+            end
+        end
+    end
+
+    return connected
+end
 
 -- 读取某等级第一台机器的成功率和实际并行数（带缓存）
 function machine.getMachineStats(level)
@@ -39,9 +86,11 @@ function machine.getMachineStats(level)
                 if ok and type(result) == "table" then
                     for _, line in ipairs(result) do
                         local clean = line:gsub("§.", "")
-                        -- 解析成功率
+                        local lowerLine = clean:lower()
+
+                        -- 解析成功率：只从包含 success/成功率/成功 的行中提取，且优先带 %
                         if successRate == nil then
-                            if clean:lower():find("success") or clean:find("成功率") or clean:find("成功") then
+                            if lowerLine:find("success") or lowerLine:find("成功率") or lowerLine:find("成功") then
                                 local num = clean:match("(%d+%.?%d*)%s*%%")
                                 if num then
                                     successRate = tonumber(num)
@@ -51,16 +100,33 @@ function machine.getMachineStats(level)
                                 end
                             end
                         end
-                        -- 解析实际并行数
+
+                        -- 解析并行数（修复误抓问题）
                         if actualParallel == nil then
-                            if clean:lower():find("parallel") or clean:find("并行") or clean:find("并联") then
-                                local num = clean:match("(%d[%d,]*)")
-                                if num then
-                                    num = num:gsub(",", "")
-                                    actualParallel = tonumber(num)
+                            local isParallelLine = lowerLine:find("parallel") or lowerLine:find("并行") or lowerLine:find("并联")
+                            if isParallelLine then
+                                -- 跳过含 machine/count/机器/数量 的行，避免误抓 “Parallel machine count: 5”
+                                local hasOtherInfo = lowerLine:find("machine") or lowerLine:find("count")
+                                    or lowerLine:find("机器") or lowerLine:find("数量")
+                                if not hasOtherInfo then
+                                    local numStr = clean:match("parallel%s*[:：]?%s*([%d,]+)")
+                                        or clean:match("并行%s*[:：]?%s*([%d,]+)")
+                                        or clean:match("并联%s*[:：]?%s*([%d,]+)")
+                                    -- 宽松匹配：但排除含 % 的行（避免与成功率混淆）
+                                    if not numStr and not clean:find("%%") then
+                                        numStr = clean:match("([%d,]+)")
+                                    end
+                                    if numStr then
+                                        numStr = numStr:gsub(",", "")
+                                        local num = tonumber(numStr)
+                                        if num and num > 0 and num <= CONST.MAX_SINGLE_PARALLEL then
+                                            actualParallel = num
+                                        end
+                                    end
                                 end
                             end
                         end
+
                         if successRate and actualParallel then break end
                     end
                 end
@@ -69,11 +135,20 @@ function machine.getMachineStats(level)
         end
     end
 
-    -- 若只找到一种数据，也尝试缓存
-    if successRate ~= nil or actualParallel ~= nil then
-        statsCache[level] = { successRate = successRate, actualParallel = actualParallel, time = now }
+    -- ★ 新增：只接受 >1 的并行数为有效值，否则保留上次有效值
+    local effectiveParallel
+    if actualParallel and actualParallel > 1 then
+        lastValidParallel[level] = actualParallel
+        effectiveParallel = actualParallel
+    else
+        effectiveParallel = lastValidParallel[level]  -- 可能为 nil
     end
-    return successRate, actualParallel
+
+    -- 缓存时使用 effectiveParallel，而不是 actualParallel
+    if successRate ~= nil or effectiveParallel ~= nil then
+        statsCache[level] = { successRate = successRate, actualParallel = effectiveParallel, time = now }
+    end
+    return successRate, effectiveParallel
 end
 
 function machine.scanAndCalculateTotalPower()
