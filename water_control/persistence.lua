@@ -20,9 +20,10 @@ function persistence.save()
         lastHourAggTime = CONFIG.REPORT.lastHourAggTime,
         lastDayAggTime = CONFIG.REPORT.lastDayAggTime,
         cachedConfig = CONFIG.CACHED_CONFIG,
+        broadcastEnabled = CONFIG.SYNC and CONFIG.SYNC.BROADCAST_ENABLED ~= false,  -- ★ 持久化广播开关
         saveUptime = computer.uptime()
     }
-    
+
     local ok, err = pcall(function()
         local f = io.open(SAVE_FILE, "w")
         if not f then error("无法打开保存文件") end
@@ -37,7 +38,7 @@ function persistence.load()
     if not filesystem.exists(SAVE_FILE) then
         return false, "无历史数据文件"
     end
-    
+
     local ok, data = pcall(function()
         local f = io.open(SAVE_FILE, "r")
         if not f then return nil end
@@ -45,11 +46,17 @@ function persistence.load()
         f:close()
         return serialization.unserialize(content)
     end)
-    
+
     if not ok or type(data) ~= "table" then
         return false, "数据文件损坏，已跳过"
     end
     local now = computer.uptime()
+
+    -- 恢复无线广播开关状态
+    if data.broadcastEnabled ~= nil then
+        if not CONFIG.SYNC then CONFIG.SYNC = {} end
+        CONFIG.SYNC.BROADCAST_ENABLED = data.broadcastEnabled
+    end
 
     -- 恢复阈值配置与启用等级列表
     if type(data.cachedConfig) == "table" then
@@ -109,7 +116,7 @@ function persistence.load()
     if type(data.lastDayAggTime) == "number" then
         CONFIG.REPORT.lastDayAggTime = data.lastDayAggTime + (now - (data.saveUptime or 0))
     end
-    
+
     return true, "历史数据与配置加载完成"
 end
 
