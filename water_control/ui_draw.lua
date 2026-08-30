@@ -58,7 +58,7 @@ function ui_draw.getLevelMachineCount(level)
     return (sr.units and sr.units[level]) or 0
 end
 
--- ★ 新增：获取某等级成功率/并行数，优先使用无线同步缓存，其次本地读取
+-- 获取某等级成功率/并行数，优先使用无线同步缓存，其次本地读取
 local function getMachineStatsCached(level)
     local sr, ap = nil, nil
     if UI._runtime and UI._runtime.machineStats and UI._runtime.machineStats[level] then
@@ -94,13 +94,15 @@ function ui_draw.drawText(x, y, text, color, bgColor)
     UI.gpu.set(x, y, text)
 end
 
+-- ★ 修复：中文占 2 个显示宽度，必须用 unicode.wlen（原 unicode.len 导致按钮文字溢出/不居中）
 function ui_draw.drawButton(x, y, w, text, color, bgColor)
     bgColor = bgColor or UI.COLORS.BTN_BG
     color = color or UI.COLORS.TEXT
     UI.gpu.setBackground(bgColor)
     UI.gpu.setForeground(color)
-    local padding = math.floor((w - unicode.len(text)) / 2)
-    UI.gpu.set(x, y, string.rep(" ", padding) .. text .. string.rep(" ", w - padding - unicode.len(text)))
+    local textW = unicode.wlen(text)
+    local padding = math.floor((w - textW) / 2)
+    UI.gpu.set(x, y, string.rep(" ", padding) .. text .. string.rep(" ", w - padding - textW))
     UI.gpu.setBackground(UI.COLORS.BG)
 end
 
@@ -124,10 +126,10 @@ function ui_draw.calculateLayout()
     local upperH = math.floor(totalContentH * 0.5)
     local lowerAreaH = totalContentH - upperH - 1
     local ctrlW = math.floor(UI.W * 0.3)
-    
+
     UI.areas.control = { x=2, y=contentStartY, w=ctrlW, h=upperH }
     UI.areas.status = { x=ctrlW+3, y=contentStartY, w=UI.W-ctrlW-4, h=upperH }
-    
+
     local lowerStartY = contentStartY + upperH + 1
     local chartX = 2
     local chartW = ctrlW
@@ -135,12 +137,12 @@ function ui_draw.calculateLayout()
     local parallelW = UI.W - 2*ctrlW - 4
     local logW = ctrlW
     local logX = UI.W - logW - 1
-    
+
     UI.areas.chart = { x=chartX, y=lowerStartY, w=chartW, h=lowerAreaH }
     UI.areas.parallel = { x=parallelX, y=lowerStartY, w=parallelW, h=lowerAreaH }
     UI.areas.log = { x=logX, y=lowerStartY, w=logW, h=lowerAreaH }
     UI.areas.report = { x=2, y=contentStartY, w=UI.W-4, h=totalContentH-1 }
-    
+
     UI.maxLogLines = lowerAreaH - 3
     UI.render.forceAll = true
 end
@@ -153,7 +155,8 @@ function ui_draw.drawTitle()
     local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
     ui_draw.drawBorder(area.x, area.y, area.w, area.h, borderColor)
     local title = "净化水线总控系统 v4.5"
-    ui_draw.drawText(math.floor((area.w - unicode.len(title))/2), area.y+1, title, UI.COLORS.TEXT_CYAN)
+    -- ★ 修复：标题居中改用显示宽度 wlen
+    ui_draw.drawText(math.floor((area.w - unicode.wlen(title))/2), area.y+1, title, UI.COLORS.TEXT_CYAN)
 end
 
 function ui_draw.drawTabBar()
@@ -235,7 +238,7 @@ function ui_draw.drawControlPanel()
     ui_draw.drawText(area.x+12, y, useCurrStr, UI.COLORS.TEXT_GREEN)
     ui_draw.drawText(area.x+12 + unicode.wlen(useCurrStr), y, useVoltStr, UI.COLORS.TEXT_PURPLE)
 
-    -- ★ 接口情况（仅显示连接状态）
+    -- 接口情况（仅显示连接状态）
     y = y + 1
     local meConnected = false
     if machine and machine.getMEInterfaceStatus then
@@ -246,7 +249,6 @@ function ui_draw.drawControlPanel()
     local connColor = meConnected and UI.COLORS.TEXT_GREEN or UI.COLORS.TEXT_RED
     ui_draw.drawText(area.x+12, y, connText, connColor)
 
-    -- 后续原有内容
     y = y + 1
     local scanResult = ui_draw.getScanResult()
     ui_draw.drawText(area.x+2, y, "部署机器：", UI.COLORS.TEXT)
@@ -255,8 +257,11 @@ function ui_draw.drawControlPanel()
     local interval = plantRunning and CONFIG.CHECK_INTERVAL_RUNNING or CONFIG.CHECK_INTERVAL_STOPPED
     ui_draw.drawText(area.x+2, y, "刷新间隔：", UI.COLORS.TEXT)
     ui_draw.drawText(area.x+12, y, interval.." 秒", UI.COLORS.TEXT_CYAN)
-    y = y + 3
+
+    -- ★ 按钮区：从文字下方第二行开始（空一行），按钮之间各空一行（y+2）
+    y = y + 2
     local btnW = area.w - 10
+    local bcEnabled = CONFIG.SYNC and CONFIG.SYNC.BROADCAST_ENABLED ~= false
     if UI.readonly then
         local disabledColor = 0x64748b
         ui_draw.drawButton(area.x+3, y, btnW, "启动系统[只读]", disabledColor, UI.COLORS.BTN_BG)
@@ -265,7 +270,7 @@ function ui_draw.drawControlPanel()
         y = y+2
         ui_draw.drawButton(area.x+3, y, btnW, "全力模式[只读]", disabledColor, UI.COLORS.BTN_BG)
         y = y+2
-        ui_draw.drawText(area.x+2, y, "镜像同步：" .. tostring(UI.syncStatus), UI.COLORS.TEXT_YELLOW)
+        ui_draw.drawButton(area.x+3, y, btnW, "无线广播[只读]", disabledColor, UI.COLORS.BTN_BG)
     else
         UI.buttons.start = { x=area.x+3, y=y, w=btnW, h=1, label="启动系统", action="start" }
         ui_draw.drawButton(area.x+3, y, btnW, "启动系统", UI.COLORS.TEXT,
@@ -277,6 +282,13 @@ function ui_draw.drawControlPanel()
         UI.buttons.fullpower = { x=area.x+3, y=y, w=btnW, h=1, label="全力模式", action="fullpower" }
         local fpBg = UI.fullPowerMode and UI.COLORS.BTN_FULL_POWER or UI.COLORS.BTN_BG
         ui_draw.drawButton(area.x+3, y, btnW, "全力模式", UI.COLORS.TEXT, fpBg)
+        y = y+2
+        -- ★ 无线广播开关按钮
+        UI.buttons.wireless = { x=area.x+3, y=y, w=btnW, h=1, label="无线广播", action="wireless" }
+        ui_draw.drawButton(area.x+3, y, btnW,
+            bcEnabled and "无线广播:开" or "无线广播:关",
+            bcEnabled and UI.COLORS.TEXT_CYAN or UI.COLORS.TEXT_YELLOW,
+            bcEnabled and UI.COLORS.BTN_BG_HOVER or UI.COLORS.BTN_BG)
     end
 end
 
@@ -566,11 +578,11 @@ local function fp_title()      return tostring(UI.fullPowerMode and 1 or 0) end
 local function fp_tabBar()     return UI.currentTab or "" end
 local function fp_control()
     local sr = ui_draw.getScanResult()
-    -- 加入接口状态指纹
     local meConn = 0
     if machine and machine.getMEInterfaceStatus then
         meConn = machine.getMEInterfaceStatus() and 1 or 0
     end
+    local bcEnabled = CONFIG.SYNC and CONFIG.SYNC.BROADCAST_ENABLED ~= false
     return table.concat({
         UI.fullPowerMode and 1 or 0,
         UI.systemRunning and 1 or 0,
@@ -582,6 +594,7 @@ local function fp_control()
         UI.readonly and 1 or 0,
         UI.syncStatus or "",
         meConn,
+        bcEnabled and 1 or 0,   -- ★ 广播开关状态加入指纹，保证按钮显示及时刷新
     }, SEP)
 end
 local function fp_status()
