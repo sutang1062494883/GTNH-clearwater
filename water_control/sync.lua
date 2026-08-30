@@ -55,12 +55,13 @@ function sync.collectSnapshot(runtime)
         },
         fullPowerMode = UI.fullPowerMode,
         systemRunning = UI.systemRunning,
+        broadcastEnabled = CONFIG.SYNC.BROADCAST_ENABLED ~= false,  -- ★ 广播开关随快照同步
         logLines = cloneData(UI.logLines),
         historyData = cloneData(UI.historyData),
         plantRunning = runtime.plantRunning or false,
         scanResult = cloneData(runtime.scanResult or {}),
         fluidCache = cloneData(runtime.fluidCache or {}),
-        machineStats = machineStats,   -- ★ 新增：成功率/并行数快照
+        machineStats = machineStats,   -- 成功率/并行数快照
     }
     return snap
 end
@@ -94,6 +95,10 @@ function sync.applySnapshot(snap)
 
     UI.fullPowerMode = snap.fullPowerMode or false
     UI.systemRunning = snap.systemRunning or false
+    -- ★ 应用广播开关状态（镜像端显示一致；本端开关由控制端交互决定，镜像端不反向控制）
+    if snap.broadcastEnabled ~= nil then
+        CONFIG.SYNC.BROADCAST_ENABLED = snap.broadcastEnabled
+    end
     UI.logLines = snap.logLines or {}
     UI.historyData = snap.historyData or {}
 
@@ -101,9 +106,9 @@ function sync.applySnapshot(snap)
     UI._runtime.plantRunning = snap.plantRunning or false
     UI._runtime.scanResult = snap.scanResult or { total = 0, host = 0, units = {} }
     UI._runtime.fluidCache = snap.fluidCache or {}
-    -- ★ 新增：缓存同步过来的成功率/并行数
+    -- 缓存同步过来的成功率/并行数
     UI._runtime.machineStats = snap.machineStats or {}
-    
+
     UI._runtime.enabled = true   -- 镜像端：启用运行时缓存通道
     UI._lastSyncTime = computer.uptime()
     return true
