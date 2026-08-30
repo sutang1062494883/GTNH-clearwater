@@ -14,6 +14,7 @@ local CONFIG = {
     CHECK_INTERVAL_STOPPED = 5,
     CHECK_INTERVAL_RUNNING = 20,
     IS_PLANT_SHUTDOWN_FROM_RUNNING = false,
+    PERSIST_SAVE_INTERVAL = 30,   -- ★ 存档最小间隔（秒）：限频写盘，避免拖慢主循环
     CALCULATED = {
         SUGGEST_SINGLE_PARALLEL = {},
         SINGLE_MACHINE_POWER = {},
@@ -37,17 +38,18 @@ local CONFIG = {
     -- 无线同步配置
     SYNC = {
         PORT = 13579,
-        BROADCAST_INTERVAL = 1.0,
+        BROADCAST_INTERVAL = 3.0,        -- ★ 广播间隔（秒）：原 1.0 改为 3.0，显著降低序列化+无线负载
         PROTOCOL_MAGIC = "WCS_SYNC",
         FRAG_PAYLOAD = 4000,
         FRAG_TIMEOUT = 3.0,
-        VERSION = 1
+        VERSION = 1,
+        BROADCAST_ENABLED = false,        -- ★ 无线广播总开关（控制面板可切换）
     },
     -- 流体缓存配置
     FLUID_CACHE = {
         TTL = 15.0,            -- 缓存有效期：必须 > QUERY_INTERVAL，留余量防闪
         PREFETCH = true,
-        QUERY_INTERVAL = 10.0   -- 【新增】真正去查流体组件的间隔（秒）
+        QUERY_INTERVAL = 10.0   -- 真正去查流体组件的间隔（秒）
     },
 }
 
