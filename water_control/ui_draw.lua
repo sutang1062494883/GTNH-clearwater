@@ -154,7 +154,7 @@ function ui_draw.drawTitle()
     UI.gpu.fill(area.x, area.y, area.w, area.h, " ")
     local borderColor = UI.fullPowerMode and UI.COLORS.BORDER_ALERT or UI.COLORS.BORDER
     ui_draw.drawBorder(area.x, area.y, area.w, area.h, borderColor)
-    local title = "净化水线总控系统 v4.5"
+    local title = "净化水线总控系统 v4.6"
     -- ★ 修复：标题居中改用显示宽度 wlen
     ui_draw.drawText(math.floor((area.w - unicode.wlen(title))/2), area.y+1, title, UI.COLORS.TEXT_CYAN)
 end
