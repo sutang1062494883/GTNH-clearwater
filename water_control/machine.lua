@@ -17,10 +17,20 @@ local MACHINE_SCAN_RESULT = { total = 0, host = 0, units = {} }
 
 -- 传感器信息缓存（避免频繁调用）
 local statsCache = {}
-local STATS_CACHE_TTL = 5  -- 秒
+local STATS_CACHE_TTL = 10  -- 秒（原 5 秒，放宽以降低传感器轮询频率）
 
--- ★ 新增：每个等级最近一次有效的并行数（>1 才认为是有效）
+-- ★ 每个等级最近一次有效的并行数（>1 才认为是有效）
 local lastValidParallel = {}
+
+-- ★ ME 接口连接状态缓存（原每帧 component.list + proxy 调用）
+local meStatusCache = nil
+local meStatusCacheTime = 0
+local ME_STATUS_CACHE_TTL = 3   -- 秒
+
+-- ★ 净水主机运行状态缓存（原每帧组件调用）
+local plantRunningCache = nil
+local plantRunningCacheTime = 0
+local PLANT_RUNNING_CACHE_TTL = 2  -- 秒
 
 function machine.getMachines() return machines end
 function machine.getScanResult() return MACHINE_SCAN_RESULT end
@@ -28,11 +38,17 @@ function machine.getScanResult() return MACHINE_SCAN_RESULT end
 -- 清除传感器缓存（刷新时调用）
 function machine.invalidateStatsCache()
     statsCache = {}
+    meStatusCache = nil
     -- 注意：不清除 lastValidParallel，保留历史有效值
 end
 
--- 获取ME接口连接状态（只返回 connected）
+-- 获取ME接口连接状态（只返回 connected，带 3 秒缓存）
 function machine.getMEInterfaceStatus()
+    local now = computer.uptime()
+    if meStatusCache ~= nil and now - meStatusCacheTime < ME_STATUS_CACHE_TTL then
+        return meStatusCache
+    end
+
     local candidates = {"fluid_interface", "me_dual_interface", "me_interface"}
     local address = nil
     for _, compType in ipairs(candidates) do
@@ -43,29 +59,30 @@ function machine.getMEInterfaceStatus()
         end
     end
 
-    if not address then
-        return false
-    end
-
-    local connected = true
-    local proxy = component.proxy(address)
-    if proxy then
-        local statusMethods = {"isConnected", "getNetworkState", "getNetworkStatus"}
-        for _, method in ipairs(statusMethods) do
-            if type(proxy[method]) == "function" then
-                local ok, res = pcall(proxy[method], proxy)
-                if ok then
-                    if type(res) == "boolean" then
-                        connected = res
-                    elseif type(res) == "table" then
-                        connected = res.connected ~= false
+    local connected = false
+    if address then
+        connected = true
+        local proxy = component.proxy(address)
+        if proxy then
+            local statusMethods = {"isConnected", "getNetworkState", "getNetworkStatus"}
+            for _, method in ipairs(statusMethods) do
+                if type(proxy[method]) == "function" then
+                    local ok, res = pcall(proxy[method], proxy)
+                    if ok then
+                        if type(res) == "boolean" then
+                            connected = res
+                        elseif type(res) == "table" then
+                            connected = res.connected ~= false
+                        end
+                        break
                     end
-                    break
                 end
             end
         end
     end
 
+    meStatusCache = connected
+    meStatusCacheTime = now
     return connected
 end
 
@@ -135,7 +152,7 @@ function machine.getMachineStats(level)
         end
     end
 
-    -- ★ 新增：只接受 >1 的并行数为有效值，否则保留上次有效值
+    -- 只接受 >1 的并行数为有效值，否则保留上次有效值
     local effectiveParallel
     if actualParallel and actualParallel > 1 then
         lastValidParallel[level] = actualParallel
@@ -160,23 +177,30 @@ function machine.scanAndCalculateTotalPower()
         local success, machineName = pcall(proxy.getName)
         if not success then goto continue end
         if machineName:find("hatch.energytunnel") then
-            totalPower = totalPower + math.floor(proxy.getEUCapacity() / 24)
-            hasValidEnergyHatch = true
+            -- ★ 补 pcall，防止某个 proxy 缺方法导致整个程序崩溃
+            local okCap, cap = pcall(proxy.getEUCapacity)
+            if okCap and type(cap) == "number" then
+                totalPower = totalPower + math.floor(cap / 24)
+                hasValidEnergyHatch = true
+            end
         elseif machineName:find("hatch.energywirelesstunnel") then
             local ampLevel = tonumber(machineName:match("tunnel(%d+)"))
-            local inputVoltage = proxy.getInputVoltage()
-            if ampLevel and ampLevel >= 1 and inputVoltage and inputVoltage > 0 then
+            local okV, inputVoltage = pcall(proxy.getInputVoltage)
+            if ampLevel and ampLevel >= 1 and okV and inputVoltage and inputVoltage > 0 then
                 local ampNum = 256 * math.pow(4, ampLevel - 1)
                 totalPower = totalPower + ampNum * inputVoltage
                 hasValidEnergyHatch = true
             else
-                totalPower = totalPower + math.floor(proxy.getEUCapacity() / 4000)
-                hasValidEnergyHatch = true
+                local okCap, cap = pcall(proxy.getEUCapacity)
+                if okCap and type(cap) == "number" then
+                    totalPower = totalPower + math.floor(cap / 4000)
+                    hasValidEnergyHatch = true
+                end
             end
         elseif machineName:find("hatch.energymulti") or machineName:find("hatch.energywirelessmulti") then
             local multiNum = tonumber(machineName:match("multi(%d+)") or machineName:match("tier.(%d+)"))
-            local inputVoltage = proxy.getInputVoltage()
-            if multiNum and inputVoltage and inputVoltage > 0 then
+            local okV, inputVoltage = pcall(proxy.getInputVoltage)
+            if multiNum and okV and inputVoltage and inputVoltage > 0 then
                 totalPower = totalPower + multiNum * inputVoltage
                 hasValidEnergyHatch = true
             end
@@ -282,15 +306,26 @@ function machine.updateMinimumStocks()
     end
 end
 
+-- 净水主机是否运行（带 2 秒缓存；业务 tick 间隔 >=5 秒，不受缓存影响）
 function machine.isWaterPlantRunning()
+    local now = computer.uptime()
+    if plantRunningCache ~= nil and now - plantRunningCacheTime < PLANT_RUNNING_CACHE_TTL then
+        return plantRunningCache
+    end
+    local result = false
     for _, plant in ipairs(machines[0].proxies) do
-        local success, result = pcall(function()
+        local success, active = pcall(function()
             if plant.isMachineActive then return plant.isMachineActive() end
             return plant.getEUStored and plant.getEUStored() > 0
         end)
-        if success and result then return true end
+        if success and active then
+            result = true
+            break
+        end
     end
-    return false
+    plantRunningCache = result
+    plantRunningCacheTime = now
+    return result
 end
 
 return machine
