@@ -56,17 +56,18 @@ function interaction.handleClick(x, y, redrawAll)
                     interaction._handleRefresh()
                 elseif btn.action == "fullpower" then
                     interaction._handleFullPower()
+                elseif btn.action == "wireless" then
+                    interaction._handleWireless()
                 end
                 redrawAll()
                 return
             end
         end
     end
-    -- ★ 修改：等级行点击只切换图表区，不再联动并行面板
+    -- 等级行点击只切换图表区，不再联动并行面板
     for level, row in pairs(UI.levelRows) do
         if x >= row.x and x < row.x+row.w and y >= row.y and y < row.y+row.h then
             if UI.currentTab == "overview" then
-                -- 仅图表区切换到该等级详细趋势
                 UI.chartMode = "detail"
                 UI.currentDetailLevel = level
                 UI.detailSwitchTime = computer.uptime()
@@ -75,7 +76,7 @@ function interaction.handleClick(x, y, redrawAll)
             return
         end
     end
-    -- ★ 新增：并行卡片点击（仅在并行概况模式）
+    -- 并行卡片点击（仅在并行概况模式）
     if UI.currentTab == "overview" and UI.parallelMode == "overview" and UI.parallelCards then
         for level, card in pairs(UI.parallelCards) do
             if x >= card.x and x < card.x + card.w and y >= card.y and y < card.y + card.h then
@@ -98,7 +99,7 @@ function interaction.handleClick(x, y, redrawAll)
             return
         end
     end
-    -- ★ 新增：并行面板空白点击（详情模式返回概况）
+    -- 并行面板空白点击（详情模式返回概况）
     local parallelArea = UI.areas.parallel
     if parallelArea and x >= parallelArea.x and x < parallelArea.x + parallelArea.w
         and y >= parallelArea.y and y < parallelArea.y + parallelArea.h then
@@ -129,7 +130,7 @@ function interaction._handleRefresh()
     if not machine or not scheduler or not report then return end
     ui_draw.appendLog("[系统] 执行全量刷新扫描")
     pcall(function()
-        -- ★ 新增：清除传感器解析缓存，确保重新读取真实并行/成功率
+        -- 清除传感器解析缓存，确保重新读取真实并行/成功率
         if machine.invalidateStatsCache then
             machine.invalidateStatsCache()
         end
@@ -169,6 +170,15 @@ function interaction._handleFullPower()
             scheduler.startProductionByAllocation(alloc)
         end)
     end
+end
+
+-- ★ 新增：无线广播开关
+function interaction._handleWireless()
+    if not CONFIG.SYNC then CONFIG.SYNC = {} end
+    CONFIG.SYNC.BROADCAST_ENABLED = not (CONFIG.SYNC.BROADCAST_ENABLED ~= false)
+    local state = CONFIG.SYNC.BROADCAST_ENABLED and "开启" or "关闭"
+    ui_draw.appendLog("[网络] 无线广播已" .. state)
+    ui_draw.invalidateAll()
 end
 
 return interaction
