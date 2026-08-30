@@ -1,4 +1,4 @@
--- installer.lua  (OpenComputers) —— 用系统 wget 下载，最稳
+-- installer.lua 
 local component  = require("component")
 local filesystem = require("filesystem")
 local shell      = require("shell")
@@ -39,7 +39,7 @@ local function main()
     end
     ensureDir(APP_DIR)
 
-    print("== 净化水线总控系统 安装器 ==")
+    print("== 净化水线总控系统 安装器 (wget 版) ==")
     print("源:       " .. BASE_URL)
     print("目标目录: " .. APP_DIR)
     print()
@@ -59,11 +59,18 @@ local function main()
         end
     end
 
-    -- 启动器（不依赖不存在的 io/os）
+    -- 启动器（自带 require 搜索路径引导，从任意目录启动都能加载模块）
     local launcher = APP_DIR .. "/start.lua"
     local f = filesystem.open(launcher, "wb")
-    f:write('local fn, err = loadfile("' .. APP_DIR .. '/main.lua")\n' ..
-            'if not fn then error(err) end\nfn()\n')
+    f:write([[
+-- start.lua：把应用目录加入 require 搜索路径后加载主程序
+-- 无论当前工作目录在哪，都能正确 require config/machine/... 等模块
+local appDir = "]] .. APP_DIR .. [["
+package.path = appDir .. "/?.lua;" .. appDir .. "/?/init.lua;" .. package.path
+local fn, err = loadfile(appDir .. "/main.lua")
+if not fn then error(err) end
+fn()
+]])
     f:close()
 
     print()
@@ -71,11 +78,10 @@ local function main()
     if #fail > 0 then
         print("以下文件失败:")
         for _, m in ipairs(fail) do print("  - " .. m) end
-        error("安装未完全成功。请检查网络环境")
+        error("安装未完全成功。若提示 404/文件为空，请去 GitHub 确认这些文件已 push 到 master 分支的 water_control/ 目录。")
     end
 
     print()
-    print("请按照wiki中所写步骤执行程序")
 end
 
 local ok, err = xpcall(main, debug.traceback)   -- 不要 pcall 吞错
